@@ -12,12 +12,14 @@ from ui.main_window import MainWindow
 
 def setup_logging() -> None:
     log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    from config import DATA_DIR
+    log_path = DATA_DIR / "odbiory.log"
     logging.basicConfig(
         level=logging.DEBUG,
         format=log_format,
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler("odbiory.log", encoding="utf-8"),
+            logging.FileHandler(str(log_path), encoding="utf-8"),
         ],
     )
 
