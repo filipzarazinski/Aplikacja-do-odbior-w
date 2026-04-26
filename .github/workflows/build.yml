@@ -1,0 +1,66 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Get version from tag
+        id: version
+        run: |
+          $ver = "${{ github.ref_name }}" -replace '^v', ''
+          echo "VER=$ver" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Update version.txt
+        run: echo "${{ steps.version.outputs.VER }}" | Out-File -FilePath version.txt -Encoding utf8 -NoNewline
+        shell: pwsh
+
+      - name: Build EXE (PyInstaller)
+        run: pyinstaller Odbiory.spec
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+        shell: pwsh
+
+      - name: Build installer
+        run: |
+          $ver = "${{ steps.version.outputs.VER }}"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$ver installer.iss
+        shell: pwsh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Odbiory v${{ steps.version.outputs.VER }}"
+          body: |
+            ## Odbiory v${{ steps.version.outputs.VER }}
+
+            ### Instalacja
+            Pobierz `Odbiory_Setup.exe` i uruchom instalator.
+
+            ### Aktualizacja
+            Użyj przycisku **"Sprawdź aktualizacje"** w Ustawieniach aplikacji — pobierze i zainstaluje automatycznie.
+          files: installer_output/Odbiory_Setup.exe
+          draft: false
+          prerelease: false

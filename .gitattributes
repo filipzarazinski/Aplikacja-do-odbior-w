@@ -1,0 +1,11 @@
+* text=auto
+*.py text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.iss text eol=lf
+*.qss text eol=lf
+*.spec text eol=lf
+*.ico binary
+*.png binary

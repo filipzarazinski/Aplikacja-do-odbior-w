@@ -1,0 +1,27 @@
+# Baza danych i dane użytkownika
+data/
+
+# Logi aplikacji
+*.log
+
+# PyInstaller output
+build/
+dist/
+
+# Archiwum
+*.zip
+
+# Claude Code settings (wewnętrzne)
+.claude/
+
+# Standardowe ignorowane pliki Pythona
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
