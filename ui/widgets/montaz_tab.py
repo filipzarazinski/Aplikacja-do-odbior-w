@@ -206,6 +206,7 @@ class MontazTab(QWidget):
         self._edit_mode = edit_mode
         self._initialized = False
         self._model_auto_set = False  # True gdy model ustawiony automatycznie z ID
+        self._current_fleet_type = ""
 
         self._build_ui()
         self._populate_dropdowns()
@@ -771,8 +772,21 @@ class MontazTab(QWidget):
 
     @Slot(str)
     def _on_fleet_name_changed(self, text: str):
-        """Automatycznie dostosowuje podpowiedzi DIN na podstawie wpisanej Floty."""
+        """Automatycznie dostosowuje podpowiedzi DIN oraz checkboxy na podstawie wpisanej Floty."""
         if not self._initialized: return
+        
+        t = text.strip().upper()
+        fleet_type = "VIP" if ("TAURON" in t or "PGE" in t) else "Zwykłe"
+        
+        if fleet_type != self._current_fleet_type:
+            self._current_fleet_type = fleet_type
+            if fleet_type == "VIP":
+                self._immo_cb.setChecked(True)
+                self._rfid_cb.setChecked(True)
+            else:
+                self._immo_cb.setChecked(False)
+                self._rfid_cb.setChecked(False)
+                
         self._reload_din_functions(text.strip())
 
     @Slot()
@@ -1240,6 +1254,8 @@ class MontazTab(QWidget):
             self._recorder_loc_edit.setText(rec.recorder_location or "")
             self._odebrane_cb.setChecked(rec.config_json.get("odebrane", False))
             
+            ft_text = (rec.fleet_name or "").strip().upper()
+            self._current_fleet_type = "VIP" if ("TAURON" in ft_text or "PGE" in ft_text) else "Zwykłe"
             self._reload_din_functions(rec.fleet_name or "")
             
             for btn in self._typ_grp.buttons(): btn.setChecked(False)
