@@ -7,19 +7,27 @@ aby uniknąć rozrzucania "magic strings" po całej bazie kodu.
 """
 
 import os
+import sys
 from pathlib import Path
 
 # --- Ścieżki ---
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "odbiory.db"
-STYLES_DIR = BASE_DIR / "resources" / "styles"
+# W zbudowanym EXE zasoby są w katalogu _MEIPASS (obok exe dla --onedir).
+# Dane użytkownika (baza, backupy) trafiają do AppData żeby nie wymagać
+# uprawnień administratora przy zapisie do Program Files.
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    DATA_DIR   = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Odbiory"
+else:
+    BUNDLE_DIR = Path(__file__).resolve().parent
+    DATA_DIR   = BUNDLE_DIR / "data"
 
+BASE_DIR   = BUNDLE_DIR
+STYLES_DIR = BUNDLE_DIR / "resources" / "styles"
+DB_PATH    = DATA_DIR / "odbiory.db"
 BACKUP_DIR = DATA_DIR / "backups"
-BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
-# Upewnij się, że folder data istnieje
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Metadane aplikacji ---
 APP_NAME = "Odbiory - System Zarządzania Montażami"

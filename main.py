@@ -1,12 +1,11 @@
 import sys
 import logging
-from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QIcon
 
-from config import APP_NAME, APP_VERSION, STYLES_DIR, DB_PATH
+from config import APP_NAME, APP_VERSION, STYLES_DIR, DB_PATH, BASE_DIR
 from database.db_manager import DatabaseManager
 from ui.main_window import MainWindow
 
@@ -25,10 +24,8 @@ def setup_logging() -> None:
 
 def load_stylesheet(app: QApplication, is_light: bool) -> None:
     """Ładuje odpowiedni plik QSS w zależności od wybranego motywu."""
-    base = Path(__file__).resolve().parent
-    
     theme_filename = "theme_light.qss" if is_light else "theme.qss"
-    qss_file = base / "resources" / "styles" / theme_filename
+    qss_file = STYLES_DIR / theme_filename
 
     if qss_file.exists():
         stylesheet = qss_file.read_text(encoding="utf-8")
@@ -59,7 +56,7 @@ def main() -> int:
     app.setFont(QFont("Segoe UI", 9))
 
     # Ustawienie ikony aplikacji
-    logo_path = Path(__file__).resolve().parent / "logo.png"
+    logo_path = BASE_DIR / "logo.png"
     if logo_path.exists():
         app.setWindowIcon(QIcon(str(logo_path)))
         

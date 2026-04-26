@@ -21,7 +21,11 @@ from database.models import ServiceRecord, Technician, DinChannel
 
 logger = logging.getLogger(__name__)
 
-_MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+import sys as _sys
+if getattr(_sys, "frozen", False):
+    _MIGRATIONS_DIR = Path(getattr(_sys, "_MEIPASS", Path(_sys.executable).parent)) / "database" / "migrations"
+else:
+    _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
 class DatabaseManager:
