@@ -280,6 +280,10 @@ class DatabaseManager:
         self._conn.commit()
         return count
 
+    def clear_sim_cards(self) -> None:
+        self._conn.execute("DELETE FROM sim_cards")
+        self._conn.commit()
+
     def get_sim_cards_count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM sim_cards").fetchone()[0]
 

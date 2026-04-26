@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QIcon
 
-from config import APP_NAME, APP_VERSION, STYLES_DIR, DB_PATH, BASE_DIR
+from config import APP_NAME, APP_VERSION, STYLES_DIR, DB_PATH, BASE_DIR, BACKUP_DIR
 from database.db_manager import DatabaseManager
 from ui.main_window import MainWindow
 
@@ -47,6 +47,16 @@ def main() -> int:
     setup_logging()
     logger = logging.getLogger(__name__)
     logger.info(f"Uruchamianie {APP_NAME} v{APP_VERSION}")
+
+    try:
+        info_file = BASE_DIR / "data_path.txt"
+        info_file.write_text(
+            f"Baza danych: {DB_PATH}\n"
+            f"Kopie zapasowe: {BACKUP_DIR}\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
     # Windows DPI scaling
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)

@@ -572,6 +572,11 @@ class SettingsWindow(QDialog):
         self._progress_lbl = QLabel("")
         self._progress_lbl.setStyleSheet("color: #64748b; font-size: 8.5pt;")
         sl.addWidget(self._progress_lbl)
+
+        btn_clear_sim = QPushButton("🗑  Wyczyść bazę SIM")
+        btn_clear_sim.setToolTip("Usuwa wszystkie karty SIM z bazy danych")
+        btn_clear_sim.clicked.connect(self._on_clear_sim)
+        sl.addWidget(btn_clear_sim)
         lay.addWidget(grp_status)
 
         lay.addStretch()
@@ -1591,6 +1596,17 @@ class SettingsWindow(QDialog):
             )
             self._lbl_count.setText(f"Kart SIM w bazie:  {self._db.get_sim_cards_count()}")
 
+    def _on_clear_sim(self):
+        reply = QMessageBox.question(
+            self, "Wyczyść bazę SIM",
+            "Czy na pewno chcesz usunąć wszystkie karty SIM z bazy?\nTej operacji nie można cofnąć.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._db.clear_sim_cards()
+            self._lbl_count.setText("Kart SIM w bazie:  0")
+            self._progress_lbl.setText("Baza SIM wyczyszczona.")
+
     def _on_create_backup(self):
         from config import DB_PATH
         import shutil
@@ -1645,7 +1661,13 @@ class SettingsWindow(QDialog):
                                 f"Nie udało się sprawdzić aktualizacji:\n{e}")
             return
 
-        if latest == APP_VERSION:
+        def _ver_tuple(v: str):
+            try:
+                return tuple(int(x) for x in v.strip().split("."))
+            except ValueError:
+                return (0,)
+
+        if _ver_tuple(latest) <= _ver_tuple(APP_VERSION):
             QMessageBox.information(self, "Aktualizacja",
                                     f"Posiadasz najnowszą wersję ({APP_VERSION}).")
             return
