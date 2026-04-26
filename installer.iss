@@ -23,7 +23,7 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
 CloseApplicationsFilter=*.exe
-RestartApplications=no
+RestartApplications=yes
 UninstallDisplayIcon={app}\{#AppExeName}
 
 [Languages]

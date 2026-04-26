@@ -1722,7 +1722,7 @@ class SettingsWindow(QDialog):
             progress.close()
 
         # Uruchom instalator (Inno Setup) i zamknij aplikację
-        subprocess.Popen([tmp_path, "/VERYSILENT", "/NORESTART", "/CLOSEAPPLICATIONS"])
+        subprocess.Popen([tmp_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
         QApplication.quit()
 
     # ---------------------------------------------------------------- helpers – General
