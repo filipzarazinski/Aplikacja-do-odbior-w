@@ -143,24 +143,29 @@ class OdbioryImportWorker(QThread):
         import pyxlsb
 
         self.progress.emit("Otwieranie pliku…")
-        rows = []
+        header_row: list[str] | None = None
+        rows: list[list] = []
+
         with pyxlsb.open_workbook(self._path) as wb:
             with wb.get_sheet("Odbiory") as ws:
                 for i, row in enumerate(ws.rows()):
                     if i == 0:
-                        continue
-                    rows.append([c.v for c in row])
+                        first_v = row[0].v if row else None
+                        if isinstance(first_v, str) and first_v.strip():
+                            header_row = [str(c.v or "").strip() for c in row]
+                        else:
+                            rows.append([c.v for c in row])
+                    else:
+                        rows.append([c.v for c in row])
+
+        col_map = self._build_col_map(header_row) if header_row else {}
 
         total = len(rows)
         self.progress.emit(f"Wczytano {total} wierszy, importowanie…")
 
         db = DatabaseManager.instance()
-        existing = db.get_existing_import_keys()   # dict: key → existing_id
-
         inserted = 0
-        updated = 0
-        skipped = 0   # actual duplicates (when not overwriting)
-        empty = 0     # rows with no cells or no date
+        empty = 0
         errors = 0
         COMMIT_EVERY = 100
 
@@ -170,56 +175,129 @@ class OdbioryImportWorker(QThread):
                 empty += 1
                 continue
             try:
-                rec = self._cells_to_record(cells)
+                rec = self._cells_to_record(cells, col_map)
                 if rec is None:
                     empty += 1
                     continue
-                key = (rec.device_id, rec.service_date, rec.service_hour, rec.service_minute)
-                if key in existing:
-                    if self._overwrite:
-                        rec.id = existing[key]
-                        db.update_record_no_commit(rec)
-                        updated += 1
-                    else:
-                        skipped += 1
-                    continue
                 db.insert_record_no_commit(rec)
-                existing[key] = None
                 inserted += 1
-                if (inserted + updated) % COMMIT_EVERY == 0:
+                if inserted % COMMIT_EVERY == 0:
                     db.commit()
             except Exception as e:
                 logger.warning(f"Row {idx + 2} import error: {e}")
                 errors += 1
 
         db.commit()
-        parts = [f"Dodano: {inserted}"]
-        if updated:
-            parts.append(f"Zaktualizowano: {updated}")
-        if skipped:
-            parts.append(f"Pominięto (duplikaty): {skipped}")
-        parts.append(f"Puste/bez daty: {empty}")
+        parts = [f"Dodano: {inserted}", f"Puste/bez daty: {empty}"]
         if errors:
             parts.append(f"Błędy: {errors}")
         msg = "Import zakończony.  " + "   |   ".join(parts)
         self.finished.emit(True, msg, errors)
 
     @staticmethod
-    def _cells_to_record(cells):
+    def _build_col_map(headers: list[str]) -> dict[str, int]:
+        """Build field-key → column-index map from header row."""
+        import unicodedata
+
+        _EXTRA = str.maketrans('łŁ', 'll')   # NFD doesn't decompose ł
+
+        def norm(s: str) -> str:
+            s = s.lower().strip().translate(_EXTRA)
+            s = unicodedata.normalize('NFD', s)
+            s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+            return ''.join(c for c in s if c.isalnum())
+
+        # Ordered: more specific/longer substrings first
+        PATTERNS = [
+            ("sonda1id",          "probe1_id"),
+            ("sonda1poj",         "probe1_cap"),
+            ("sonda1dl",          "probe1_len"),
+            ("sonda2id",          "probe2_id"),
+            ("sonda2poj",         "probe2_cap"),
+            ("sonda2dl",          "probe2_len"),
+            ("ktoryzbiornik",     "right_tank_probe"),
+            ("komentarzprywatny", "private_comment"),
+            ("czasdyzurow",       "duty_time"),
+            ("typrejestratora",   "recorder_type"),
+            ("rodzajpojazdu",     "vehicle_type"),
+            ("canconfigname",     "_skip_can_config_name"),  # absorb before "canconfig"
+            ("canconfig",         "can_config"),
+            ("dinconfig",         "din_config"),
+            ("additionalconfig",  "additional_config"),
+            ("numerrejestracyjn", "license_plate"),
+            ("numerboczn",        "side_number"),
+            ("gdzierejestrator",  "recorder_location"),
+            ("markaimodel",       "vehicle_brand"),
+            ("markamodel",        "vehicle_brand"),
+            ("firmwaretacho",     "firmware_tacho"),
+            ("modelurzadzen",     "device_model"),
+            ("montazserwis",      "record_type"),
+            ("czynnosciwykon",    "comment"),   # "Czynności wykonane przez montera"
+            ("przebieg",          "mileage"),
+            ("immorfid",          "immo_rfid"),
+            ("immo",              "immo_rfid"),
+            ("tablet",            "tablet"),
+            ("firma",             "company_name"),
+            ("flota",             "fleet_name"),
+        ]
+        EXACT = [
+            ("data",    "date"),
+            ("czas",    "time"),
+            ("sim",     "sim_number"),
+            ("id",      "device_id"),
+            ("monter",  "technician"),  # exact to avoid matching "...przez montera"
+        ]
+
+        result: dict[str, int] = {}
+        assigned: set[int] = set()
+        normalized = [(idx, norm(h)) for idx, h in enumerate(headers)]
+
+        for col_idx, hn in normalized:
+            if not hn or col_idx in assigned:
+                continue
+            for pattern, field_key in PATTERNS:
+                if field_key not in result and pattern in hn:
+                    result[field_key] = col_idx
+                    assigned.add(col_idx)
+                    break
+
+        for col_idx, hn in normalized:
+            if not hn or col_idx in assigned:
+                continue
+            for pattern, field_key in EXACT:
+                if field_key not in result and hn == pattern:
+                    result[field_key] = col_idx
+                    assigned.add(col_idx)
+                    break
+
+        # "Numer SIM" → "numerism" (removes space) which contains "sim"
+        if "sim_number" not in result:
+            for col_idx, hn in normalized:
+                if col_idx not in assigned and "sim" in hn:
+                    result["sim_number"] = col_idx
+                    break
+
+        return result
+
+    @staticmethod
+    def _cells_to_record(cells, col_map: dict):
         from datetime import datetime as _dt, timedelta
         import json
         from database.models import ServiceRecord, DinChannel
         from config import CAN_JSON_KEYS, CAN_CONNECTION_TRUCK, CAN_CONNECTION_CAR
 
-        def get(idx, default=None):
-            return cells[idx] if idx < len(cells) else default
+        def _get(field_key: str, fallback_idx: int, default=None):
+            idx = col_map.get(field_key, fallback_idx) if col_map else fallback_idx
+            if idx is None or idx >= len(cells):
+                return default
+            return cells[idx]
 
-        def s(idx):
-            v = get(idx)
+        def _s(field_key: str, fallback_idx: int) -> str:
+            v = _get(field_key, fallback_idx)
             return "" if v is None else str(v).strip()
 
-        # --- Date (col 0) ---
-        date_v = get(0)
+        # --- Date ---
+        date_v = _get("date", 0)
         service_date = ""
         if isinstance(date_v, (int, float)) and date_v > 0:
             service_date = (_dt(1899, 12, 30) + timedelta(days=int(date_v))).strftime("%Y-%m-%d")
@@ -236,27 +314,26 @@ class OdbioryImportWorker(QThread):
         if not service_date:
             return None
 
-        # --- Time (col 15) ---
-        time_v = get(15)
+        # --- Time ---
+        time_v = _get("time", 15)
         service_hour, service_minute = 0, 0
         if isinstance(time_v, (int, float)) and time_v > 0:
             total_min = round(time_v * 24 * 60)
             service_hour = (total_min // 60) % 24
             service_minute = total_min % 60
 
-        # --- Monter (col 14): "CODE - Full Name" ---
-        monter_raw = s(14)
-        technician_name = monter_raw.split(" - ", 1)[1].strip() if " - " in monter_raw else monter_raw
+        # --- Monter ---
+        technician_name = _s("technician", 14)
 
-        # --- Side number (col 6): may be float ---
-        side_v = get(6)
+        # --- Side number (may be float) ---
+        side_v = _get("side_number", 6)
         if isinstance(side_v, float) and side_v == int(side_v):
             side_number = str(int(side_v))
         else:
-            side_number = s(6)
+            side_number = "" if side_v is None else str(side_v).strip()
 
-        # --- Mileage (col 19) ---
-        mileage_v = get(19)
+        # --- Mileage ---
+        mileage_v = _get("mileage", 19)
         mileage = None
         if isinstance(mileage_v, (int, float)) and mileage_v > 0:
             mileage = int(mileage_v)
@@ -266,12 +343,12 @@ class OdbioryImportWorker(QThread):
             except (ValueError, TypeError):
                 pass
 
-        # --- Duty time (col 13): keep "H:MM" string as-is (that's how the form stores it) ---
-        duty_time_min = s(13) or None
+        # --- Duty time ---
+        duty_time_min = _s("duty_time", 13) or None
 
-        # --- Probe values ---
-        def probe_float(idx):
-            v = get(idx)
+        # --- Probe float helper ---
+        def probe_float(field_key: str, fallback_idx: int):
+            v = _get(field_key, fallback_idx)
             if isinstance(v, (int, float)):
                 return float(v) if v else None
             if isinstance(v, str):
@@ -281,12 +358,12 @@ class OdbioryImportWorker(QThread):
                     pass
             return None
 
-        # --- CAN config (col 31) — store raw dict for form display ---
+        # --- CAN config ---
         can_active = False
         can_checkboxes = [False] * 8
         can_vehicle_type = ""
         can_cfg: dict = {}
-        can_raw = s(31)
+        can_raw = _s("can_config", 31)
         if can_raw:
             try:
                 can_cfg = json.loads(can_raw)
@@ -301,19 +378,17 @@ class OdbioryImportWorker(QThread):
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        # --- DIN config (col 33) — convert to new format + populate DinChannel fields ---
+        # --- DIN config ---
         din1, din2, din3 = DinChannel(), DinChannel(), DinChannel()
         din_cfg: dict = {}
-        din_raw = s(33)
+        din_raw = _s("din_config", 33)
         if din_raw:
             try:
                 din_d = json.loads(din_raw)
                 if din_d:
                     if any(k.startswith("din") and k[3:].isdigit() for k in din_d):
-                        # New format already: pass through
                         din_cfg = din_d
                     else:
-                        # Old format (webasto/inny/pompa keys) → convert to din1/din2/...
                         next_idx = 1
                         if "webasto" in din_d:
                             props = din_d["webasto"]
@@ -330,7 +405,6 @@ class OdbioryImportWorker(QThread):
                             }
                             next_idx += 1
 
-                    # Build DinChannel objects (din_type as raw bit number matching form convention)
                     din_channels = []
                     for key in sorted((k for k in din_cfg if k.startswith("din") and k[3:].isdigit()), key=lambda x: int(x[3:])):
                         d = din_cfg[key]
@@ -352,26 +426,26 @@ class OdbioryImportWorker(QThread):
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        # --- Tablet (col 41): "True|sn|power" ---
+        # --- Tablet: "True|sn|power" ---
         has_tablet, tablet_sn, has_power = False, "", False
-        tablet_raw = s(41)
+        tablet_raw = _s("tablet", 41)
         if tablet_raw:
             parts = tablet_raw.split("|")
             has_tablet = parts[0].lower() == "true"
             tablet_sn = parts[1].strip() if len(parts) > 1 else ""
             has_power = (parts[2].strip() == "1") if len(parts) > 2 else False
 
-        # --- Immo|RFID (col 42) ---
+        # --- Immo|RFID ---
         has_immo, has_rfid = False, False
-        immo_raw = s(42)
+        immo_raw = _s("immo_rfid", 42)
         if "|" in immo_raw:
             parts = immo_raw.split("|")
             has_immo = parts[0].strip() == "1"
             has_rfid = parts[1].strip() == "1" if len(parts) > 1 else False
 
-        # --- additionalConfig: raw (col 34) + override immo/rfid from col 42 ---
+        # --- Additional config ---
         add_cfg: dict = {}
-        add_raw = s(34)
+        add_raw = _s("additional_config", 34)
         if add_raw:
             try:
                 add_cfg = json.loads(add_raw)
@@ -384,7 +458,7 @@ class OdbioryImportWorker(QThread):
         if service_date:
             try:
                 dt_obj = _dt.strptime(service_date, "%Y-%m-%d")
-                if dt_obj.weekday() >= 5:  # 5 = Sobota, 6 = Niedziela
+                if dt_obj.weekday() >= 5:
                     is_weekend = True
             except ValueError:
                 pass
@@ -395,35 +469,36 @@ class OdbioryImportWorker(QThread):
             "canConfig": can_cfg,
             "dinConfig": din_cfg,
             "additionalConfig": add_cfg,
-            "komentarzPrywatny": s(44),
+            "komentarzPrywatny": _s("private_comment", 44),
             "odebrane": True,
             "dyzurZaznaczony": dyzur,
         }
 
+        rt = _s("record_type", 2)
         return ServiceRecord(
-            record_type=s(2) if s(2) else " ",
+            record_type=rt if rt else " ",
             service_date=service_date,
             service_hour=service_hour,
             service_minute=service_minute,
-            company_name=s(3),
-            fleet_name=s(4),
-            license_plate=s(5),
+            company_name=_s("company_name", 3),
+            fleet_name=_s("fleet_name", 4),
+            license_plate=_s("license_plate", 5),
             side_number=side_number,
-            vehicle_brand=s(9),
-            vehicle_type=s(28),
-            device_id=s(7),
-            sim_number=s(8),
-            device_model=s(27),
-            firmware_tacho=s(17),
-            recorder_location=s(18),
+            vehicle_brand=_s("vehicle_brand", 9),
+            vehicle_type=_s("vehicle_type", 28),
+            device_id=_s("device_id", 7),
+            sim_number=_s("sim_number", 8),
+            device_model=_s("device_model", 27),
+            firmware_tacho=_s("firmware_tacho", 17),
+            recorder_location=_s("recorder_location", 18),
             mileage=mileage,
-            probe1_id=s(20),
-            probe1_capacity=probe_float(21),
-            probe1_length=probe_float(22),
-            probe2_id=s(23),
-            probe2_capacity=probe_float(24),
-            probe2_length=probe_float(25),
-            right_tank_probe=s(26),
+            probe1_id=_s("probe1_id", 20),
+            probe1_capacity=probe_float("probe1_cap", 21),
+            probe1_length=probe_float("probe1_len", 22),
+            probe2_id=_s("probe2_id", 23),
+            probe2_capacity=probe_float("probe2_cap", 24),
+            probe2_length=probe_float("probe2_len", 25),
+            right_tank_probe=_s("right_tank_probe", 26),
             can_active=can_active,
             can_checkboxes=can_checkboxes,
             can_vehicle_type=can_vehicle_type,
@@ -437,7 +512,7 @@ class OdbioryImportWorker(QThread):
             has_power=has_power,
             config_json=config_json,
             technician_name=technician_name,
-            comment=s(11),
+            comment=_s("comment", 11),
             duty_time_min=duty_time_min,
         )
 
@@ -1079,7 +1154,8 @@ class SettingsWindow(QDialog):
 
         hint = QLabel(
             "Import rekordów z pliku Odbiory.xlsb do bazy danych.\n"
-            "Duplikaty (ten sam ID urządzenia + data + godzina) są pomijane automatycznie."
+            "Każdy wiersz zostaje zaimportowany — bez pomijania duplikatów.\n"
+            "Kolumny dopasowywane są automatycznie po nagłówkach (obsługa różnych układów pliku)."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #94a3b8; font-size: 8.5pt;")
@@ -1106,10 +1182,6 @@ class SettingsWindow(QDialog):
         self._btn_import_odbiory.setFixedHeight(30)
         self._btn_import_odbiory.clicked.connect(self._on_import_odbiory)
         opt_row.addWidget(self._btn_import_odbiory, 1)
-
-        self._cb_overwrite = QCheckBox("Aktualizuj istniejące rekordy")
-        self._cb_overwrite.setToolTip("Jeśli zaznaczone, istniejące rekordy (ten sam ID+data+godzina) zostaną nadpisane.")
-        opt_row.addWidget(self._cb_overwrite)
         lay.addLayout(opt_row)
 
         self._import_progress_bar = QProgressBar()
@@ -1170,8 +1242,7 @@ class SettingsWindow(QDialog):
         self._import_progress_bar.setVisible(True)
         self._import_result_lbl.setText("")
 
-        overwrite = self._cb_overwrite.isChecked()
-        self._import_worker = OdbioryImportWorker(path, overwrite=overwrite)
+        self._import_worker = OdbioryImportWorker(path)
         self._import_worker.progress.connect(self._import_progress_lbl.setText)
         self._import_worker.row_done.connect(self._on_import_row_done)
         self._import_worker.finished.connect(self._on_import_finished)
