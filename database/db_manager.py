@@ -82,6 +82,38 @@ class DatabaseManager:
         except sqlite3.OperationalError:
             pass  # Kolumna już istnieje
 
+        # Migracja: zmiana UNIQUE(name) → UNIQUE(name, fleet_name)
+        # żeby jedna firma mogła figurować na wielu flotach jako osobne wiersze.
+        row = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='companies'"
+        ).fetchone()
+        if row and "UNIQUE(name, fleet_name)" not in (row[0] or ""):
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS companies_new (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name            TEXT    NOT NULL COLLATE NOCASE,
+                    device_protocol TEXT    DEFAULT 'FM3',
+                    fleet_type      TEXT    DEFAULT 'Zwykłe',
+                    is_active       INTEGER DEFAULT 1,
+                    fleet_name      TEXT    NOT NULL DEFAULT '' COLLATE NOCASE,
+                    UNIQUE(name, fleet_name)
+                );
+                INSERT OR IGNORE INTO companies_new
+                    (id, name, device_protocol, fleet_type, is_active, fleet_name)
+                SELECT
+                    id,
+                    name,
+                    COALESCE(device_protocol, 'FM3'),
+                    COALESCE(fleet_type, 'Zwykłe'),
+                    COALESCE(is_active, 1),
+                    COALESCE(fleet_name, '')
+                FROM companies;
+                DROP TABLE companies;
+                ALTER TABLE companies_new RENAME TO companies;
+            """)
+            self._conn.commit()
+            logger.info("Migracja companies: UNIQUE(name) → UNIQUE(name, fleet_name)")
+
     def commit(self) -> None:
         if self._conn:
             self._conn.commit()
@@ -105,7 +137,7 @@ class DatabaseManager:
     def upsert_company_with_fleet(self, name: str, fleet_name: str) -> None:
         self._conn.execute(
             """INSERT INTO companies (name, fleet_name) VALUES (?, ?)
-               ON CONFLICT(name) DO UPDATE SET fleet_name = excluded.fleet_name""",
+               ON CONFLICT(name, fleet_name) DO NOTHING""",
             (name.strip(), fleet_name.strip()),
         )
 
@@ -286,6 +318,25 @@ class DatabaseManager:
 
     def get_sim_cards_count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM sim_cards").fetchone()[0]
+
+    def get_all_sim_cards(self) -> list[tuple]:
+        """Zwraca [(id, sim, ccid, synced_at)] posortowane po numerze SIM."""
+        rows = self._conn.execute(
+            "SELECT id, sim, ccid, synced_at FROM sim_cards ORDER BY sim COLLATE NOCASE"
+        ).fetchall()
+        return [(r[0], r[1], r[2], r[3]) for r in rows]
+
+    def delete_sim_card_by_id(self, card_id: int) -> bool:
+        cur = self._conn.execute("DELETE FROM sim_cards WHERE id = ?", (card_id,))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def upsert_sim_card(self, sim: str, ccid: str) -> None:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._conn.execute(
+            "INSERT OR REPLACE INTO sim_cards (sim, ccid, synced_at) VALUES (?, ?, ?)",
+            (sim.strip(), ccid.strip(), now),
+        )
 
     def get_existing_import_keys(self) -> dict:
         """Returns dict of (device_id, service_date, service_hour, service_minute) → id for duplicate detection."""

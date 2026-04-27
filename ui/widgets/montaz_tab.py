@@ -1100,6 +1100,7 @@ class MontazTab(QWidget):
             if not self._webasto_high_rb.isChecked() and not self._webasto_low_rb.isChecked():
                 self._webasto_high_rb.setChecked(True)
         else:
+            self._webasto_din_combo.setText("")
             self._webasto_level_grp.setExclusive(False)
             self._webasto_high_rb.setChecked(False)
             self._webasto_low_rb.setChecked(False)

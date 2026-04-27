@@ -497,21 +497,37 @@ class SettingsWindow(QDialog):
         inner.addTab(self._build_sim_tab(),              "  Baza SIM  ")
         inner.addTab(self._build_zbiorcze_tab(),         "  Importy  ")
         inner.addTab(self._build_bulk_import_widget(),   "  Import zbiorczy  ")
+        inner.currentChanged.connect(
+            lambda idx: self._sim_dict_tab.ensure_loaded() if idx == 0 else None
+        )
         lay.addWidget(inner, 1)
         return w
 
     # ---------------------------------------------------------------- SIM tab
 
     def _build_sim_tab(self) -> QWidget:
+        from PySide6.QtWidgets import QSplitter
+        from PySide6.QtCore import Qt as _Qt
+        from ui.dict_tab import DictTab
+
         w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(14, 14, 14, 10)
-        lay.setSpacing(10)
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        splitter = QSplitter(_Qt.Vertical)
+        splitter.setChildrenCollapsible(False)
+
+        # ── Panel górny: synchronizacja + status ────────────────────────────
+        top = QWidget()
+        lay = QVBoxLayout(top)
+        lay.setContentsMargins(14, 10, 14, 6)
+        lay.setSpacing(8)
 
         # --- Synchronizacja przez URL ---
         grp_url = QGroupBox("Synchronizacja przez SharePoint / URL")
         gl = QVBoxLayout(grp_url)
-        gl.setSpacing(8)
+        gl.setSpacing(6)
 
         gl.addWidget(QLabel("URL pliku Excel:"))
         url_row = QHBoxLayout()
@@ -528,67 +544,88 @@ class SettingsWindow(QDialog):
         url_row.addWidget(btn_open)
         gl.addLayout(url_row)
 
+        sync_row = QHBoxLayout()
         btn_sync_url = QPushButton("📥  Synchronizuj przez URL")
         btn_sync_url.setObjectName("btn_primary")
         btn_sync_url.clicked.connect(self._on_sync_url)
-        gl.addWidget(btn_sync_url)
-        lay.addWidget(grp_url)
+        sync_row.addWidget(btn_sync_url, 1)
 
-        # --- Synchronizacja z lokalnego pliku ---
-        grp_file = QGroupBox("Synchronizacja z lokalnego pliku Excel")
-        fl = QVBoxLayout(grp_file)
-        fl.setSpacing(8)
-
-        file_row = QHBoxLayout()
         self._file_edit = QLineEdit()
-        self._file_edit.setPlaceholderText("Ścieżka do pliku .xlsx / .xlsm …")
+        self._file_edit.setPlaceholderText("lub ścieżka do pliku .xlsx / .xlsm …")
         saved_file = self._db.get_setting("sim_source_file", "")
         self._file_edit.setText(saved_file)
-        file_row.addWidget(self._file_edit, 1)
+        sync_row.addWidget(self._file_edit, 1)
 
-        btn_browse = QPushButton("Przeglądaj…")
-        btn_browse.setFixedWidth(90)
+        btn_browse = QPushButton("…")
+        btn_browse.setFixedWidth(28)
         btn_browse.clicked.connect(self._on_browse)
-        file_row.addWidget(btn_browse)
-        fl.addLayout(file_row)
+        sync_row.addWidget(btn_browse)
 
-        btn_sync_file = QPushButton("📂  Wczytaj z pliku")
+        btn_sync_file = QPushButton("📂  Z pliku")
+        btn_sync_file.setFixedWidth(90)
         btn_sync_file.clicked.connect(self._on_sync_file)
-        fl.addWidget(btn_sync_file)
-        lay.addWidget(grp_file)
+        sync_row.addWidget(btn_sync_file)
+        gl.addLayout(sync_row)
+
+        lay.addWidget(grp_url)
 
         # --- Status ---
-        grp_status = QGroupBox("Status")
-        sl = QVBoxLayout(grp_status)
-        sl.setSpacing(6)
-
+        status_row = QHBoxLayout()
         last_sync = self._db.get_setting("sim_last_sync", "–")
         count = self._db.get_sim_cards_count()
-        self._lbl_last = QLabel(f"Ostatnia synchronizacja:  {last_sync}")
+        self._lbl_last  = QLabel(f"Ostatnia synchronizacja:  {last_sync}")
         self._lbl_count = QLabel(f"Kart SIM w bazie:  {count}")
-        sl.addWidget(self._lbl_last)
-        sl.addWidget(self._lbl_count)
-
         self._progress_lbl = QLabel("")
         self._progress_lbl.setStyleSheet("color: #64748b; font-size: 8.5pt;")
-        sl.addWidget(self._progress_lbl)
 
-        btn_clear_sim = QPushButton("🗑  Wyczyść bazę SIM")
+        btn_clear_sim = QPushButton("🗑  Wyczyść wszystkie")
         btn_clear_sim.setToolTip("Usuwa wszystkie karty SIM z bazy danych")
         btn_clear_sim.clicked.connect(self._on_clear_sim)
-        sl.addWidget(btn_clear_sim)
-        lay.addWidget(grp_status)
 
-        lay.addStretch()
+        status_row.addWidget(self._lbl_last)
+        status_row.addWidget(QLabel("  |  "))
+        status_row.addWidget(self._lbl_count)
+        status_row.addWidget(self._progress_lbl)
+        status_row.addStretch()
+        status_row.addWidget(btn_clear_sim)
+        lay.addLayout(status_row)
 
-        note = QLabel(
-            "ℹ  Kolumna A = SIM,  kolumna B = CCID  (wiersz 1 = nagłówek – pomijany).\n"
-            "Wymagane biblioteki: pip install requests openpyxl"
-        )
-        note.setWordWrap(True)
+        note = QLabel("ℹ  Kolumna A = SIM,  kolumna B = CCID  (wiersz 1 = nagłówek – pomijany).  "
+                      "Wymagane: pip install requests openpyxl")
         note.setStyleSheet("color: #64748b; font-size: 8pt;")
         lay.addWidget(note)
 
+        splitter.addWidget(top)
+
+        # ── Panel dolny: tabela kart SIM ────────────────────────────────────
+        def _sim_excel_parser(ws):
+            result = []
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i == 0:
+                    first = str(row[0] or "").strip().lower()
+                    if not first.lstrip("+").isdigit():
+                        continue
+                sim  = str(row[0] or "").strip()
+                ccid = str(row[1] or "").strip() if len(row) > 1 else ""
+                if sim and ccid and sim.lower() not in ("none", "sim"):
+                    result.append([sim, ccid])
+            return result
+
+        self._sim_dict_tab = DictTab(
+            headers=["Numer SIM", "CCID", "Data synchronizacji"],
+            loader=self._db.get_all_sim_cards,
+            saver=lambda vals: self._db.upsert_sim_card(vals[0], vals[1]),
+            deleter=self._db.delete_sim_card_by_id,
+            excel_sheet="SIM",
+            excel_parser=_sim_excel_parser,
+            add_labels=["Numer SIM", "CCID"],
+            commit_fn=self._db.commit,
+            lazy=True,
+        )
+        splitter.addWidget(self._sim_dict_tab)
+
+        splitter.setSizes([220, 400])
+        outer.addWidget(splitter, 1)
         return w
 
     # ---------------------------------------------------------------- Firmy tab
@@ -1595,6 +1632,7 @@ class SettingsWindow(QDialog):
                 f"Ostatnia synchronizacja:  {self._db.get_setting('sim_last_sync', '–')}"
             )
             self._lbl_count.setText(f"Kart SIM w bazie:  {self._db.get_sim_cards_count()}")
+            self._sim_dict_tab.refresh()
 
     def _on_clear_sim(self):
         reply = QMessageBox.question(
@@ -1606,6 +1644,7 @@ class SettingsWindow(QDialog):
             self._db.clear_sim_cards()
             self._lbl_count.setText("Kart SIM w bazie:  0")
             self._progress_lbl.setText("Baza SIM wyczyszczona.")
+            self._sim_dict_tab.refresh()
 
     def _on_create_backup(self):
         from config import DB_PATH

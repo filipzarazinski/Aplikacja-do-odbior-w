@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate, QStyleOptionViewItem, QStyle
 )
 from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint
-from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QPainter
+from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush
 
 from config import APP_NAME, APP_VERSION, MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT
 from database.db_manager import DatabaseManager
@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 # (etykieta, atrybut/wirtualny, domyślnie widoczna)
 ALL_COLUMNS = [
     ("ID",                       "id",                False),
-    ("Data i godzina",           "_datetime",         True),
-    ("Data",                     "service_date",      False),
+    ("Data",                     "_datetime",         True),
     ("Firma",                    "company_name",      True),
     ("Flota",                    "fleet_name",        True),
     ("Nr rej.",                  "license_plate",     True),
@@ -36,7 +35,7 @@ ALL_COLUMNS = [
     ("Marka pojazdu",            "vehicle_brand",     True),
     ("Typ pojazdu",              "vehicle_type",      False),
     ("Model urządzenia",         "device_model",      True),
-    ("ID urządzenia",            "device_id",         True),
+    ("ID",                       "device_id",         True),
     ("SIM",                      "sim_number",        True),
     ("CCID",                     "_ccid",             True),
     ("Monter",                   "technician_name",   True),
@@ -58,7 +57,7 @@ _DEFAULT_VISIBLE = frozenset(attr for _, attr, vis in ALL_COLUMNS if vis)
 _ALL_ATTRS_ORDERED = [attr for _, attr, _ in ALL_COLUMNS]
 
 _COL_WIDTHS = {
-    "id": 50,             "_datetime": 135,     "service_date": 90,
+    "id": 50,             "_datetime": 135,
     "company_name": 200,  "fleet_name": 60,     "license_plate": 90,
     "side_number": 70,    "vehicle_brand": 140, "vehicle_type": 90,
     "device_model": 120,  "device_id": 130,     "sim_number": 140,
@@ -70,7 +69,7 @@ _COL_WIDTHS = {
 }
 
 _CENTER_ATTRS = frozenset({
-    "id", "service_date", "_datetime", "record_type",
+    "id", "_datetime", "record_type",
     "_can", "duty_time_min", "_json", "_odebrane", "_duty_checked",
 })
 
@@ -450,25 +449,33 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{ background: {bg_hover}; border-color: #64748b; }}
         """
 
-        self._btn_q_today = QPushButton("Dzisiaj")
-        self._btn_q_month = QPushButton("Ostatni miesiąc")
-        self._btn_q_duty = QPushButton("Tylko dyżur")
-        self._btn_q_no_duty = QPushButton("Bez dyżuru")
-        
-        for btn in (self._btn_q_today, self._btn_q_month, self._btn_q_duty, self._btn_q_no_duty):
+        self._btn_q_today       = QPushButton("Dzisiaj")
+        self._btn_q_week        = QPushButton("Ten tydzień")
+        self._btn_q_month       = QPushButton("Ostatni miesiąc")
+        self._btn_q_prev_month  = QPushButton("Poprzedni miesiąc")
+        self._btn_q_year        = QPushButton("Ten rok")
+        self._btn_q_duty        = QPushButton("Tylko dyżur")
+        self._btn_q_no_duty     = QPushButton("Bez dyżuru")
+
+        for btn in (self._btn_q_today, self._btn_q_week, self._btn_q_month,
+                    self._btn_q_prev_month, self._btn_q_year,
+                    self._btn_q_duty, self._btn_q_no_duty):
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(btn_q_style)
             q_lay.addWidget(btn)
-            
+
         self._btn_q_today.clicked.connect(self._on_q_today)
+        self._btn_q_week.clicked.connect(self._on_q_week)
         self._btn_q_month.clicked.connect(self._on_q_month)
+        self._btn_q_prev_month.clicked.connect(self._on_q_prev_month)
+        self._btn_q_year.clicked.connect(self._on_q_year)
         self._btn_q_duty.clicked.connect(lambda: self._on_q_duty(True))
         self._btn_q_no_duty.clicked.connect(lambda: self._on_q_duty(False))
-        
+
         is_duty = self._db.get_setting("show_duty_section", "1") == "1"
         self._btn_q_duty.setVisible(is_duty)
         self._btn_q_no_duty.setVisible(is_duty)
-        
+
         q_lay.addStretch()
         main_lay.addLayout(q_lay)
 
@@ -610,20 +617,22 @@ class MainWindow(QMainWindow):
     def _restore_settings(self):
         settings = QSettings("TwojaFirma", "SystemOdbiory")
 
+        _known_attrs = set(_ALL_ATTRS_ORDERED)
+
         saved_order = settings.value("column_order")
         if saved_order and isinstance(saved_order, list) and saved_order:
-            known = set(saved_order)
+            saved_order = [a for a in saved_order if a in _known_attrs]
             for attr in _ALL_ATTRS_ORDERED:
-                if attr not in known:
+                if attr not in set(saved_order):
                     saved_order.append(attr)
             self._column_order = saved_order
 
         saved_vis = settings.value("visible_columns")
         if saved_vis:
             if isinstance(saved_vis, list):
-                self._visible_columns = set(saved_vis) | {"id", "_odebrane"}
+                self._visible_columns = (set(saved_vis) & _known_attrs) | {"id", "_odebrane"}
             elif isinstance(saved_vis, str) and saved_vis:
-                self._visible_columns = set(saved_vis.split(",")) | {"id", "_odebrane"}
+                self._visible_columns = (set(saved_vis.split(",")) & _known_attrs) | {"id", "_odebrane"}
             self._rebuild_table_columns()
         else:
             self._visible_columns.add("_odebrane")
@@ -1059,6 +1068,14 @@ class MainWindow(QMainWindow):
         self._on_filter()
 
     @Slot()
+    def _on_q_week(self):
+        today = QDate.currentDate()
+        monday = today.addDays(-(today.dayOfWeek() - 1))
+        self._filter_date_from.setDate(monday)
+        self._filter_date_to.setDate(monday.addDays(6))
+        self._on_filter()
+
+    @Slot()
     def _on_q_month(self):
         today = QDate.currentDate()
         first_day = QDate(today.year(), today.month(), 1)
@@ -1067,16 +1084,30 @@ class MainWindow(QMainWindow):
         self._filter_date_to.setDate(last_day)
         self._on_filter()
 
+    @Slot()
+    def _on_q_prev_month(self):
+        today = QDate.currentDate()
+        first_day = QDate(today.year(), today.month(), 1).addMonths(-1)
+        last_day = QDate(first_day.year(), first_day.month(), first_day.daysInMonth())
+        self._filter_date_from.setDate(first_day)
+        self._filter_date_to.setDate(last_day)
+        self._on_filter()
+
+    @Slot()
+    def _on_q_year(self):
+        today = QDate.currentDate()
+        self._filter_date_from.setDate(QDate(today.year(), 1, 1))
+        self._filter_date_to.setDate(QDate(today.year(), 12, 31))
+        self._on_filter()
+
     @Slot(bool)
     def _on_q_duty(self, only_duty: bool):
         current_search = self._filter_search.text().strip()
         terms = [t for t in current_search.split() if not t.startswith("dyżur:")]
-        
         if only_duty:
             terms.append("dyżur:dyżur")
         else:
             terms.append("dyżur:")
-            
         self._filter_search.setText(" ".join(terms))
         self._on_filter()
 
@@ -1086,11 +1117,10 @@ class MainWindow(QMainWindow):
         dlg = SettingsWindow(ALL_COLUMNS, self._column_order, self._visible_columns, self)
         dlg.columns_changed.connect(self._on_columns_changed)
         dlg.exec()
-        
+
         is_duty = self._db.get_setting("show_duty_section", "1") == "1"
-        if hasattr(self, "_btn_q_duty"):
-            self._btn_q_duty.setVisible(is_duty)
-            self._btn_q_no_duty.setVisible(is_duty)
+        self._btn_q_duty.setVisible(is_duty)
+        self._btn_q_no_duty.setVisible(is_duty)
 
     @Slot(set, list)
     def _on_columns_changed(self, visible: set, order: list):

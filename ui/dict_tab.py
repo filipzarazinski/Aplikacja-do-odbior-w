@@ -88,6 +88,7 @@ class DictTab(QWidget):
         excel_parser: Callable,
         add_labels: list[str] = None,
         commit_fn: Callable = None,
+        lazy: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -99,23 +100,39 @@ class DictTab(QWidget):
         self._excel_parser = excel_parser
         self._add_labels = add_labels or headers
         self._commit = commit_fn or (lambda: None)
+        self._lazy = lazy
+        self._loaded = False
         self._row_ids: list[int] = []
+        self._all_records: list = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
-        # Info label
+        # Search bar
+        search_row = QHBoxLayout()
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("🔍  Szukaj…  (kolumna:tekst)")
+        self._search.setFixedHeight(26)
+        self._search.setClearButtonEnabled(True)
+        self._search.setToolTip(
+            "Szukaj we wszystkich kolumnach: wpisz tekst\n"
+            "Szukaj w konkretnej kolumnie: nazwa_kolumny:tekst\n"
+            "Przykład:  ccid:8948  lub  sim:501"
+        )
+        self._search.textChanged.connect(self._apply_filter)
+        search_row.addWidget(self._search, 1)
         self._info_lbl = QLabel()
         self._info_lbl.setStyleSheet("color: #64748b; font-size: 8.5pt;")
-        layout.addWidget(self._info_lbl)
+        search_row.addWidget(self._info_lbl)
+        layout.addLayout(search_row)
 
         # Table
         self._table = QTableWidget()
         self._table.setColumnCount(len(headers))
         self._table.setHorizontalHeaderLabels(headers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.verticalHeader().setVisible(False)
@@ -150,25 +167,77 @@ class DictTab(QWidget):
         btn_row.addWidget(btn_imp)
         layout.addLayout(btn_row)
 
-        self.refresh()
+        if not lazy:
+            self.refresh()
+        else:
+            self._info_lbl.setText("Nie załadowano")
 
     # ---------------------------------------------------------------- Public
 
+    def ensure_loaded(self):
+        """Ładuje dane jeśli jeszcze nie były ładowane (lazy load)."""
+        if not self._loaded:
+            self.refresh()
+
     def refresh(self):
-        records = self._loader()
+        self._loaded = True
+        self._all_records = self._loader()
         self._row_ids = []
-        self._table.setRowCount(0)
-        for rec in records:
-            rid = rec[0]
+        n = len(self._all_records)
+
+        self._table.setSortingEnabled(False)
+        self._table.setUpdatesEnabled(False)
+        self._table.clearContents()
+        self._table.setRowCount(n)
+
+        for i, rec in enumerate(self._all_records):
+            self._row_ids.append(rec[0])
             vals = [str(v) if v is not None else "" for v in rec[1:]]
-            row = self._table.rowCount()
-            self._table.insertRow(row)
-            for col, val in enumerate(vals):
+            for col, val in enumerate(vals[:len(self._headers)]):
                 item = QTableWidgetItem(val)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                self._table.setItem(row, col, item)
-            self._row_ids.append(rid)
-        self._info_lbl.setText(f"Rekordów: {len(records)}")
+                self._table.setItem(i, col, item)
+
+        self._table.setUpdatesEnabled(True)
+        self._apply_filter()
+
+    def _apply_filter(self):
+        raw = self._search.text().strip()
+        visible = 0
+        total = self._table.rowCount()
+
+        # Parsowanie "kolumna:tekst" — dopasowanie nazwy kolumny (częściowe, bez wielkości liter)
+        col_idx: int | None = None
+        query = raw.lower()
+        if ":" in raw:
+            col_part, _, val_part = raw.partition(":")
+            col_key = col_part.strip().lower()
+            for i, hdr in enumerate(self._headers):
+                if col_key in hdr.lower():
+                    col_idx = i
+                    query = val_part.strip().lower()
+                    break
+
+        for row in range(total):
+            if not query:
+                match = True
+            elif col_idx is not None:
+                cell = self._table.item(row, col_idx)
+                match = query in (cell.text().lower() if cell else "")
+            else:
+                match = any(
+                    query in (self._table.item(row, c).text().lower() if self._table.item(row, c) else "")
+                    for c in range(self._table.columnCount())
+                )
+            self._table.setRowHidden(row, not match)
+            if match:
+                visible += 1
+
+        if query:
+            col_label = f" [{self._headers[col_idx]}]" if col_idx is not None else ""
+            self._info_lbl.setText(f"Wyniki{col_label}: {visible} / {total}")
+        else:
+            self._info_lbl.setText(f"Rekordów: {total}")
 
     # ---------------------------------------------------------------- Slots
 
@@ -182,10 +251,15 @@ class DictTab(QWidget):
                 self.refresh()
                 self.data_changed.emit()
 
+    def _selected_rows(self) -> list[int]:
+        """Zwraca posortowaną listę indeksów zaznaczonych wierszy (bez duplikatów)."""
+        return sorted({idx.row() for idx in self._table.selectedIndexes()})
+
     def _on_edit(self):
-        row = self._table.currentRow()
-        if row < 0:
+        rows = self._selected_rows()
+        if len(rows) != 1:
             return
+        row = rows[0]
         current = [
             self._table.item(row, c).text()
             for c in range(self._table.columnCount())
@@ -194,7 +268,6 @@ class DictTab(QWidget):
         if dlg.exec():
             vals = dlg.get_values()
             if any(vals):
-                # Update: delete old + insert new
                 self._deleter(self._row_ids[row])
                 self._saver(vals)
                 self._commit()
@@ -202,16 +275,20 @@ class DictTab(QWidget):
                 self.data_changed.emit()
 
     def _on_delete(self):
-        row = self._table.currentRow()
-        if row < 0:
+        rows = self._selected_rows()
+        if not rows:
             return
-        name = self._table.item(row, 0).text()
+        if len(rows) == 1:
+            name = self._table.item(rows[0], 0).text()
+            msg = f"Usunąć '{name}'?"
+        else:
+            msg = f"Usunąć zaznaczone {len(rows)} rekordy?"
         if QMessageBox.question(
-            self, "Usuń rekord",
-            f"Usunac '{name}'?",
+            self, "Usuń rekord", msg,
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         ) == QMessageBox.Yes:
-            self._deleter(self._row_ids[row])
+            for row in rows:
+                self._deleter(self._row_ids[row])
             self._commit()
             self.refresh()
             self.data_changed.emit()
