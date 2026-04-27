@@ -145,19 +145,6 @@ def main() -> int:
                              f"Nie można otworzyć bazy danych:\n{exc}\n\nŚcieżka: {DB_PATH}")
         return 1
 
-    # 1b. Auto-backup przy starcie (jeśli skonfigurowany folder)
-    auto_backup_path = db.get_setting("auto_backup_path", "").strip()
-    if auto_backup_path:
-        import shutil, os
-        from datetime import datetime
-        try:
-            os.makedirs(auto_backup_path, exist_ok=True)
-            backup_name = f"odbiory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-            shutil.copy2(DB_PATH, os.path.join(auto_backup_path, backup_name))
-            logger.info(f"Auto-backup: {os.path.join(auto_backup_path, backup_name)}")
-        except Exception as exc:
-            logger.warning(f"Auto-backup nie powiódł się: {exc}")
-
     # 2. Odczyt motywu i ładowanie globalnych stylów
     is_light = db.get_setting("theme_mode", "dark") == "light"
     load_stylesheet(app, is_light)
@@ -187,6 +174,20 @@ def main() -> int:
         return 1
 
     exit_code = app.exec()
+
+    # Auto-backup przy zamknięciu
+    import shutil, os
+    from datetime import datetime
+    auto_backup_path = db.get_setting("auto_backup_path", "").strip()
+    if auto_backup_path:
+        try:
+            os.makedirs(auto_backup_path, exist_ok=True)
+            backup_name = f"odbiory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            shutil.copy2(DB_PATH, os.path.join(auto_backup_path, backup_name))
+            logger.info(f"Auto-backup: {os.path.join(auto_backup_path, backup_name)}")
+        except Exception as exc:
+            logger.warning(f"Auto-backup nie powiódł się: {exc}")
+
     db.close()
     logger.info("Aplikacja zamknięta.")
     return exit_code
