@@ -15,16 +15,12 @@ from PySide6.QtWidgets import (
     QMessageBox, QDialogButtonBox, QProgressDialog, QApplication,
 )
 from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QColor
-from PySide6.QtCore import QUrl
+from PySide6.QtGui import QColor
 
 from database.db_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
-_SHAREPOINT_URL_DEFAULT = (
-    "https://twoja-firma.sharepoint.com/.../BAZA_KART_SIM.xlsm"
-)
 
 
 # ── Worker thread do synchronizacji ───────────────────────────────────────────
@@ -596,77 +592,54 @@ class SettingsWindow(QDialog):
         # ── Panel górny: synchronizacja + status ────────────────────────────
         top = QWidget()
         lay = QVBoxLayout(top)
-        lay.setContentsMargins(14, 10, 14, 6)
-        lay.setSpacing(8)
+        lay.setContentsMargins(8, 8, 8, 4)
+        lay.setSpacing(5)
 
-        # --- Synchronizacja przez URL ---
-        grp_url = QGroupBox("Synchronizacja przez SharePoint / URL")
-        gl = QVBoxLayout(grp_url)
-        gl.setSpacing(6)
-
-        gl.addWidget(QLabel("URL pliku Excel:"))
-        url_row = QHBoxLayout()
-        self._url_edit = QLineEdit()
-        saved_url = self._db.get_setting("sim_source_url", _SHAREPOINT_URL_DEFAULT)
-        self._url_edit.setText(saved_url)
-        self._url_edit.setPlaceholderText("https://...")
-        url_row.addWidget(self._url_edit, 1)
-
-        btn_open = QPushButton("Otwórz ↗")
-        btn_open.setFixedWidth(80)
-        btn_open.setToolTip("Otwiera URL w przeglądarce (zaloguj się, pobierz plik)")
-        btn_open.clicked.connect(self._open_url_in_browser)
-        url_row.addWidget(btn_open)
-        gl.addLayout(url_row)
-
-        sync_row = QHBoxLayout()
-        btn_sync_url = QPushButton("📥  Synchronizuj przez URL")
-        btn_sync_url.setObjectName("btn_primary")
-        btn_sync_url.clicked.connect(self._on_sync_url)
-        sync_row.addWidget(btn_sync_url, 1)
-
+        # --- Synchronizacja z pliku ---
+        file_row = QHBoxLayout()
+        file_row.setSpacing(4)
         self._file_edit = QLineEdit()
-        self._file_edit.setPlaceholderText("lub ścieżka do pliku .xlsx / .xlsm …")
+        self._file_edit.setPlaceholderText("Ścieżka do pliku .xlsx / .xlsm …")
         saved_file = self._db.get_setting("sim_source_file", "")
         self._file_edit.setText(saved_file)
-        sync_row.addWidget(self._file_edit, 1)
+        file_row.addWidget(self._file_edit, 1)
 
         btn_browse = QPushButton("…")
         btn_browse.setFixedWidth(28)
         btn_browse.clicked.connect(self._on_browse)
-        sync_row.addWidget(btn_browse)
+        file_row.addWidget(btn_browse)
 
-        btn_sync_file = QPushButton("📂  Z pliku")
-        btn_sync_file.setFixedWidth(90)
+        btn_sync_file = QPushButton("📥  Wczytaj z pliku")
+        btn_sync_file.setObjectName("btn_primary")
         btn_sync_file.clicked.connect(self._on_sync_file)
-        sync_row.addWidget(btn_sync_file)
-        gl.addLayout(sync_row)
-
-        lay.addWidget(grp_url)
+        file_row.addWidget(btn_sync_file)
+        lay.addLayout(file_row)
 
         # --- Status ---
         status_row = QHBoxLayout()
+        status_row.setSpacing(4)
         last_sync = self._db.get_setting("sim_last_sync", "–")
         count = self._db.get_sim_cards_count()
-        self._lbl_last  = QLabel(f"Ostatnia synchronizacja:  {last_sync}")
-        self._lbl_count = QLabel(f"Kart SIM w bazie:  {count}")
+        self._lbl_last  = QLabel(f"Ostatnia sync:  {last_sync}")
+        self._lbl_count = QLabel(f"Kart SIM:  {count}")
         self._progress_lbl = QLabel("")
+        for lbl in (self._lbl_last, self._lbl_count, self._progress_lbl):
+            lbl.setStyleSheet("font-size: 8.5pt;")
         self._progress_lbl.setStyleSheet("color: #64748b; font-size: 8.5pt;")
 
-        btn_clear_sim = QPushButton("🗑  Wyczyść wszystkie")
+        btn_clear_sim = QPushButton("🗑  Wyczyść")
         btn_clear_sim.setToolTip("Usuwa wszystkie karty SIM z bazy danych")
         btn_clear_sim.clicked.connect(self._on_clear_sim)
 
         status_row.addWidget(self._lbl_last)
-        status_row.addWidget(QLabel("  |  "))
+        status_row.addWidget(QLabel("|"))
         status_row.addWidget(self._lbl_count)
         status_row.addWidget(self._progress_lbl)
         status_row.addStretch()
         status_row.addWidget(btn_clear_sim)
         lay.addLayout(status_row)
 
-        note = QLabel("ℹ  Kolumna A = SIM,  kolumna B = CCID  (wiersz 1 = nagłówek – pomijany).  "
-                      "Wymagane: pip install requests openpyxl")
+        note = QLabel("ℹ  Kol. A = SIM,  kol. B = CCID  (wiersz 1 = nagłówek – pomijany).  pip install openpyxl")
         note.setStyleSheet("color: #64748b; font-size: 8pt;")
         lay.addWidget(note)
 
@@ -699,7 +672,7 @@ class SettingsWindow(QDialog):
         )
         splitter.addWidget(self._sim_dict_tab)
 
-        splitter.setSizes([220, 400])
+        splitter.setSizes([110, 500])
         outer.addWidget(splitter, 1)
         return w
 
@@ -1022,10 +995,8 @@ class SettingsWindow(QDialog):
         file_row = QHBoxLayout()
         self._bulk_path = QLineEdit()
         self._bulk_path.setPlaceholderText("Ścieżka do pliku .xlsx / .xlsm …")
-        self._bulk_path.setFixedHeight(26)
         file_row.addWidget(self._bulk_path, 1)
         btn_browse = QPushButton("Przeglądaj…")
-        btn_browse.setFixedHeight(26)
         btn_browse.setFixedWidth(90)
         btn_browse.clicked.connect(self._on_bulk_browse)
         file_row.addWidget(btn_browse)
@@ -1034,10 +1005,8 @@ class SettingsWindow(QDialog):
         btn_row = QHBoxLayout()
         btn_import = QPushButton("📥  Importuj wszystkie arkusze")
         btn_import.setObjectName("btn_primary")
-        btn_import.setFixedHeight(28)
         btn_import.clicked.connect(self._on_bulk_import)
         btn_refresh = QPushButton("🔄  Odśwież słowniki")
-        btn_refresh.setFixedHeight(28)
         btn_refresh.clicked.connect(self._on_refresh_all)
         btn_row.addWidget(btn_import, 1)
         btn_row.addWidget(btn_refresh)
@@ -1164,13 +1133,11 @@ class SettingsWindow(QDialog):
         file_row = QHBoxLayout()
         self._import_path = QLineEdit()
         self._import_path.setPlaceholderText("Ścieżka do pliku Odbiory.xlsb …")
-        self._import_path.setFixedHeight(26)
         saved_path = _QS("TwojaFirma", "SystemOdbiory").value("import/odbiory_path", "")
         self._import_path.setText(saved_path)
         file_row.addWidget(self._import_path, 1)
 
         btn_browse = QPushButton("Przeglądaj…")
-        btn_browse.setFixedHeight(26)
         btn_browse.setFixedWidth(90)
         btn_browse.clicked.connect(self._on_import_browse)
         file_row.addWidget(btn_browse)
@@ -1179,7 +1146,6 @@ class SettingsWindow(QDialog):
         opt_row = QHBoxLayout()
         self._btn_import_odbiory = QPushButton("📥  Importuj Odbiory.xlsb")
         self._btn_import_odbiory.setObjectName("btn_primary")
-        self._btn_import_odbiory.setFixedHeight(30)
         self._btn_import_odbiory.clicked.connect(self._on_import_odbiory)
         opt_row.addWidget(self._btn_import_odbiory, 1)
         lay.addLayout(opt_row)
@@ -1308,8 +1274,6 @@ class SettingsWindow(QDialog):
         move_row = QHBoxLayout()
         btn_up = QPushButton("▲  Wyżej")
         btn_down = QPushButton("▼  Niżej")
-        btn_up.setFixedHeight(26)
-        btn_down.setFixedHeight(26)
         btn_up.clicked.connect(self._move_col_up)
         btn_down.clicked.connect(self._move_col_down)
         move_row.addWidget(btn_up)
@@ -1318,8 +1282,6 @@ class SettingsWindow(QDialog):
 
         btn_all = QPushButton("Zaznacz wszystkie")
         btn_none = QPushButton("Odznacz wszystkie")
-        btn_all.setFixedHeight(26)
-        btn_none.setFixedHeight(26)
         btn_all.clicked.connect(lambda: self._set_all_checked(True))
         btn_none.clicked.connect(lambda: self._set_all_checked(False))
         move_row.addWidget(btn_all)
@@ -1328,7 +1290,6 @@ class SettingsWindow(QDialog):
 
         btn_apply = QPushButton("Zastosuj kolumny")
         btn_apply.setObjectName("btn_primary")
-        btn_apply.setFixedHeight(28)
         btn_apply.clicked.connect(self._apply_columns)
         lay.addWidget(btn_apply)
 
@@ -1381,8 +1342,7 @@ class SettingsWindow(QDialog):
         mode_lay.addWidget(self._lbl_od_cols)
         
         self._btn_od_cols_pick = QPushButton("Zmień...")
-        self._btn_od_cols_pick.setFixedSize(55, 22)
-        self._btn_od_cols_pick.setStyleSheet("font-size: 8pt; padding: 0px;")
+        self._btn_od_cols_pick.setStyleSheet("font-size: 8pt;")
         self._btn_od_cols_pick.clicked.connect(lambda: self._pick_highlight_columns("odebrane_highlight_cols", self._lbl_od_cols))
         mode_lay.addWidget(self._btn_od_cols_pick)
         
@@ -1432,8 +1392,7 @@ class SettingsWindow(QDialog):
         dz_cols_lay.addWidget(self._lbl_dz_cols)
 
         self._btn_dz_cols_pick = QPushButton("Zmień...")
-        self._btn_dz_cols_pick.setFixedSize(55, 22)
-        self._btn_dz_cols_pick.setStyleSheet("font-size: 8pt; padding: 0px;")
+        self._btn_dz_cols_pick.setStyleSheet("font-size: 8pt;")
         self._btn_dz_cols_pick.clicked.connect(lambda: self._pick_highlight_columns("dyzur_highlight_cols", self._lbl_dz_cols))
         dz_cols_lay.addWidget(self._btn_dz_cols_pick)
         dz_cols_lay.addStretch()
@@ -1465,7 +1424,7 @@ class SettingsWindow(QDialog):
         grid.addWidget(QLabel(label), row, 0)
 
         preview = QPushButton()
-        preview.setFixedSize(34, 26)
+        preview.setFixedSize(34, 22)
         preview.setFlat(True)
         preview.setStyleSheet(
             f"background:{current}; border:1px solid #64748b; border-radius:3px;"
@@ -1477,8 +1436,7 @@ class SettingsWindow(QDialog):
         grid.addWidget(lbl, row, 2)
 
         btn = QPushButton("Zmień…")
-        btn.setFixedSize(55, 22)
-        btn.setStyleSheet("font-size: 8pt; padding: 0px;")
+        btn.setStyleSheet("font-size: 8pt;")
         btn.clicked.connect(lambda _=False, k=key, p=preview, l=lbl: self._pick_color(k, p, l))
         grid.addWidget(btn, row, 3)
 
@@ -1626,18 +1584,35 @@ class SettingsWindow(QDialog):
 
         btn_row_b = QHBoxLayout()
         btn_backup = QPushButton("💾  Utwórz kopię zapasową")
-        btn_backup.setFixedHeight(28)
         btn_backup.clicked.connect(self._on_create_backup)
-        
+
         btn_restore = QPushButton("📂  Przywróć z kopii")
-        btn_restore.setFixedHeight(28)
         btn_restore.clicked.connect(self._on_restore_backup)
-        
+
         btn_row_b.addWidget(btn_backup)
         btn_row_b.addWidget(btn_restore)
         btn_row_b.addStretch()
         bl.addLayout(btn_row_b)
-        
+
+        auto_row = QHBoxLayout()
+        auto_row.addWidget(QLabel("Automatyczna kopia (folder):"))
+        self._auto_backup_edit = QLineEdit()
+        self._auto_backup_edit.setPlaceholderText("Wybierz folder…")
+        self._auto_backup_edit.setText(self._db.get_setting("auto_backup_path", ""))
+        self._auto_backup_edit.textChanged.connect(
+            lambda t: self._db.set_setting("auto_backup_path", t.strip())
+        )
+        auto_row.addWidget(self._auto_backup_edit, 1)
+        btn_auto_browse = QPushButton("…")
+        btn_auto_browse.setFixedWidth(28)
+        btn_auto_browse.clicked.connect(self._on_auto_backup_browse)
+        auto_row.addWidget(btn_auto_browse)
+        bl.addLayout(auto_row)
+
+        note_auto = QLabel("ℹ  Kopia tworzona automatycznie przy każdym uruchomieniu aplikacji.")
+        note_auto.setStyleSheet("color: #64748b; font-size: 8pt;")
+        bl.addWidget(note_auto)
+
         lay.addWidget(grp_backup)
 
         # --- Aktualizacje ---
@@ -1646,7 +1621,6 @@ class SettingsWindow(QDialog):
         ul.setSpacing(8)
 
         btn_update = QPushButton("🔄  Sprawdź aktualizacje")
-        btn_update.setFixedHeight(28)
         btn_update.clicked.connect(self._on_check_updates)
         ul.addWidget(btn_update)
         lay.addWidget(grp_update)
@@ -1655,12 +1629,15 @@ class SettingsWindow(QDialog):
 
         return w
 
-    # ---------------------------------------------------------------- helpers – SIM
+    # ---------------------------------------------------------------- helpers – Auto backup
 
-    def _open_url_in_browser(self):
-        url = self._url_edit.text().strip()
-        if url:
-            QDesktopServices.openUrl(QUrl(url))
+    def _on_auto_backup_browse(self):
+        from PySide6.QtWidgets import QFileDialog as _QFD
+        folder = _QFD.getExistingDirectory(self, "Wybierz folder automatycznej kopii zapasowej")
+        if folder:
+            self._auto_backup_edit.setText(folder)
+
+    # ---------------------------------------------------------------- helpers – SIM
 
     def _on_browse(self):
         path, _ = QFileDialog.getOpenFileName(

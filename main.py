@@ -1,13 +1,70 @@
 import sys
 import logging
 
-from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont, QIcon
 
-from config import APP_NAME, APP_VERSION, STYLES_DIR, DB_PATH, BASE_DIR, BACKUP_DIR
+from config import APP_NAME, APP_VERSION, STYLES_DIR, DB_PATH, BASE_DIR, BACKUP_DIR, VERSION_URL, INSTALLER_URL
 from database.db_manager import DatabaseManager
 from ui.main_window import MainWindow
+
+
+class UpdateChecker(QThread):
+    update_available = Signal(str)   # emits latest version string
+
+    def run(self):
+        try:
+            import requests
+            r = requests.get(VERSION_URL, timeout=6)
+            r.raise_for_status()
+            latest = r.text.strip()
+            if self._newer(latest, APP_VERSION):
+                self.update_available.emit(latest)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _newer(a: str, b: str) -> bool:
+        def t(v):
+            try:
+                return tuple(int(x) for x in v.split("."))
+            except ValueError:
+                return (0,)
+        return t(a) > t(b)
+
+
+def _download_and_install(parent, version: str) -> None:
+    import os, tempfile, subprocess
+    tmp_path = os.path.join(tempfile.gettempdir(), "Odbiory_Setup.exe")
+    progress = QProgressDialog(f"Pobieranie wersji {version}…", "Anuluj", 0, 100, parent)
+    progress.setWindowTitle("Aktualizacja")
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setMinimumWidth(340)
+    progress.setValue(0)
+    progress.show()
+    try:
+        import requests
+        r = requests.get(INSTALLER_URL, stream=True, timeout=60)
+        r.raise_for_status()
+        total = int(r.headers.get("content-length", 0))
+        downloaded = 0
+        with open(tmp_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=65536):
+                if progress.wasCanceled():
+                    return
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total:
+                    progress.setValue(int(downloaded * 100 / total))
+                QApplication.processEvents()
+    except Exception as e:
+        QMessageBox.critical(parent, "Błąd pobierania", f"Nie udało się pobrać aktualizacji:\n{e}")
+        return
+    finally:
+        progress.close()
+    subprocess.Popen([tmp_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
+    QApplication.quit()
 
 
 def setup_logging() -> None:
@@ -88,6 +145,19 @@ def main() -> int:
                              f"Nie można otworzyć bazy danych:\n{exc}\n\nŚcieżka: {DB_PATH}")
         return 1
 
+    # 1b. Auto-backup przy starcie (jeśli skonfigurowany folder)
+    auto_backup_path = db.get_setting("auto_backup_path", "").strip()
+    if auto_backup_path:
+        import shutil, os
+        from datetime import datetime
+        try:
+            os.makedirs(auto_backup_path, exist_ok=True)
+            backup_name = f"odbiory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            shutil.copy2(DB_PATH, os.path.join(auto_backup_path, backup_name))
+            logger.info(f"Auto-backup: {os.path.join(auto_backup_path, backup_name)}")
+        except Exception as exc:
+            logger.warning(f"Auto-backup nie powiódł się: {exc}")
+
     # 2. Odczyt motywu i ładowanie globalnych stylów
     is_light = db.get_setting("theme_mode", "dark") == "light"
     load_stylesheet(app, is_light)
@@ -95,6 +165,22 @@ def main() -> int:
     try:
         window = MainWindow()
         window.show()
+
+        def _on_update(latest: str):
+            reply = QMessageBox.question(
+                window, "Dostępna nowa wersja",
+                f"Dostępna wersja:  {latest}\n"
+                f"Twoja wersja:      {APP_VERSION}\n\n"
+                "Pobrać i zainstalować teraz?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                _download_and_install(window, latest)
+
+        _checker = UpdateChecker()
+        _checker.update_available.connect(_on_update)
+        _checker.start()
+
     except Exception as exc:
         logger.critical(f"Błąd okna głównego: {exc}", exc_info=True)
         QMessageBox.critical(None, "Błąd krytyczny", f"Nie można otworzyć aplikacji:\n{exc}")

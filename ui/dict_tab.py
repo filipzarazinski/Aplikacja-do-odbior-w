@@ -106,14 +106,15 @@ class DictTab(QWidget):
         self._all_records: list = []
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
 
         # Search bar
         search_row = QHBoxLayout()
+        search_row.setSpacing(6)
         self._search = QLineEdit()
         self._search.setPlaceholderText("🔍  Szukaj…  (kolumna:tekst)")
-        self._search.setFixedHeight(26)
+        self._search.setFixedHeight(24)
         self._search.setClearButtonEnabled(True)
         self._search.setToolTip(
             "Szukaj we wszystkich kolumnach: wpisz tekst\n"
@@ -123,7 +124,7 @@ class DictTab(QWidget):
         self._search.textChanged.connect(self._apply_filter)
         search_row.addWidget(self._search, 1)
         self._info_lbl = QLabel()
-        self._info_lbl.setStyleSheet("color: #64748b; font-size: 8.5pt;")
+        self._info_lbl.setStyleSheet("color: #64748b; font-size: 8pt;")
         search_row.addWidget(self._info_lbl)
         layout.addLayout(search_row)
 
@@ -136,29 +137,33 @@ class DictTab(QWidget):
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.verticalHeader().setVisible(False)
-        self._table.verticalHeader().setDefaultSectionSize(22)
+        self._table.verticalHeader().setDefaultSectionSize(20)
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.Stretch)
+        hdr.setDefaultSectionSize(80)
         self._table.doubleClicked.connect(self._on_edit)
         layout.addWidget(self._table, 1)
 
         # Buttons
         btn_row = QHBoxLayout()
-        btn_add = QPushButton("＋  Dodaj")
-        btn_edit = QPushButton("✎  Edytuj")
-        btn_del = QPushButton("✕  Usuń")
-        btn_imp = QPushButton(f"📥  Importuj z Excel  ({excel_sheet})")
-        for b in (btn_add, btn_edit, btn_del):
-            b.setFixedHeight(26)
-        btn_imp.setFixedHeight(26)
+        btn_row.setSpacing(4)
+
+        btn_add   = QPushButton("＋ Dodaj")
+        btn_edit  = QPushButton("✎ Edytuj")
+        btn_del   = QPushButton("✕ Usuń")
+        btn_clear = QPushButton("⊘ Usuń wszystkie")
+        btn_imp   = QPushButton("📥 Importuj z Excel")
+
+        btn_imp.setToolTip(f"Importuj z arkusza: {excel_sheet}")
         btn_imp.setObjectName("btn_primary")
-        btn_clear = QPushButton("⊘  Usuń wszystkie")
-        btn_clear.setFixedHeight(26)
+
+
         btn_add.clicked.connect(self._on_add)
         btn_edit.clicked.connect(self._on_edit)
         btn_del.clicked.connect(self._on_delete)
-        btn_imp.clicked.connect(self._on_import)
         btn_clear.clicked.connect(self._on_clear_all)
+        btn_imp.clicked.connect(self._on_import)
+
         btn_row.addWidget(btn_add)
         btn_row.addWidget(btn_edit)
         btn_row.addWidget(btn_del)
