@@ -426,7 +426,7 @@ class MontazTab(QWidget):
         tg_rb_lay = QHBoxLayout()
         self._tach_btng = QButtonGroup(self)
         self._rb_siemens   = _rb("Siemens")
-        self._rb_stonerige = _rb("Stonerige")
+        self._rb_stonerige = _rb("Stoneridge")
         for rb in (self._rb_siemens, self._rb_stonerige):
             self._tach_btng.addButton(rb); tg_rb_lay.addWidget(rb)
         tg_rb_lay.addStretch()
@@ -1173,7 +1173,7 @@ class MontazTab(QWidget):
         model_tacho = ""
         wersja_tacho = ""
         if d8_val == "Tachoreader":
-            model_tacho = "Siemens" if self._rb_siemens.isChecked() else "Stonerige" if self._rb_stonerige.isChecked() else ""
+            model_tacho = "Siemens" if self._rb_siemens.isChecked() else "Stoneridge" if self._rb_stonerige.isChecked() else ""
             wersja_tacho = self._tacho_ver.text().strip()
         elif d8_val == "FMB640/FMC650":
             model_tacho = "Siemens" if self._rb_tel_s.isChecked() else "Stoneridge" if self._rb_tel_sr.isChecked() else "Inne" if self._rb_tel_i.isChecked() else ""
@@ -1407,7 +1407,7 @@ class MontazTab(QWidget):
         d8 = self._d8_combo.currentText()
         if d8=="Tachoreader":
             brand = "Siemens" if self._rb_siemens.isChecked() else \
-                    "Stonerige" if self._rb_stonerige.isChecked() else ""
+                    "Stoneridge" if self._rb_stonerige.isChecked() else ""
             rec.firmware_tacho = f"{brand} {self._tacho_ver.text().strip()}".strip()
         elif d8=="FMB640/FMC650":
             brand = "Siemens" if self._rb_tel_s.isChecked() else \

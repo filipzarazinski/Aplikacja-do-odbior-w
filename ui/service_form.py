@@ -9,7 +9,7 @@ from typing import Optional
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QWidget, QPushButton, QLabel, QMessageBox,
+    QWidget, QPushButton, QMessageBox,
     QApplication
 )
 from PySide6.QtCore import Qt, Slot, QTimer, QSettings
@@ -37,6 +37,8 @@ class ServiceForm(QDialog):
         self._connect_signals()
         if self._edit_mode:
             self._tab_montaz.load_from_record(self._record)
+        self._original_record = copy.deepcopy(self._record)
+        self._tab_montaz.collect_to_record(self._original_record)
 
     def _setup_ui(self):
         if self._edit_mode:
@@ -45,12 +47,12 @@ class ServiceForm(QDialog):
         else:
             title = "Nowy montaż"
         self.setWindowTitle(title)
+        self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
         self.setMinimumSize(FORM_WIDTH, FORM_HEIGHT)
         settings = QSettings("TwojaFirma", "SystemOdbiory")
         w = settings.value("form/width", FORM_WIDTH, type=int)
         h = settings.value("form/height", FORM_HEIGHT, type=int)
         self.resize(w, h)
-        self.setModal(True)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -145,8 +147,22 @@ class ServiceForm(QDialog):
             return # Całkowicie "zjadamy" Enter
         super().keyPressEvent(event)
 
+    def _is_dirty(self) -> bool:
+        try:
+            temp = copy.deepcopy(self._record)
+            self._tab_montaz.collect_to_record(temp)
+            temp.id = self._original_record.id
+            temp.created_at = self._original_record.created_at
+            temp.updated_at = self._original_record.updated_at
+            return temp != self._original_record
+        except Exception:
+            return True
+
     def reject(self):
         """Wywoływane przy kliknięciu przycisku X w prawym rogu, ESC lub 'Anuluj'."""
+        if not self._is_dirty():
+            super().reject()
+            return
         reply = QMessageBox.question(
             self,
             "Niezapisane zmiany",
@@ -157,7 +173,7 @@ class ServiceForm(QDialog):
         if reply == QMessageBox.Yes:
             self._on_save()
         elif reply == QMessageBox.No:
-            super().reject() # Zamyka bez zapisywania
+            super().reject()
         # Jeśli Cancel -> nie rób nic (zostań w formularzu)
 
     @Slot()

@@ -302,6 +302,7 @@ class MainWindow(QMainWindow):
         self._json_col_index: int = -1
         self._loading: bool = False
         self._flash_timers: list = []
+        self._open_forms: list = []
         self._is_light = self._db.get_setting("theme_mode", "dark") == "light"
         self._setup_ui()
         self._connect_signals()
@@ -1000,9 +1001,7 @@ class MainWindow(QMainWindow):
             return
             
         from ui.service_form import ServiceForm
-        if ServiceForm(parent=self, record=rec).exec():
-            self.load_records()
-            self._status_bar.showMessage("Rekord zaktualizowany.", 3000)
+        self._open_form(ServiceForm(record=rec), "Rekord zaktualizowany.")
 
     @Slot()
     def _on_item_changed(self, item: QTableWidgetItem):
@@ -1175,12 +1174,19 @@ class MainWindow(QMainWindow):
             logger.error(f"Błąd duplikowania: {exc}", exc_info=True)
             QMessageBox.critical(self, "Błąd", f"Nie udało się zduplikować:\n{exc}")
 
+    def _open_form(self, form, success_msg: str):
+        """Otwiera formularz jako niezależne okno (non-modal)."""
+        self._open_forms.append(form)
+        form.accepted.connect(lambda: (self.load_records(),
+                                       self._status_bar.showMessage(success_msg, 3000)))
+        form.finished.connect(lambda: self._open_forms.remove(form)
+                              if form in self._open_forms else None)
+        form.show()
+
     @Slot()
     def _on_new(self):
         from ui.service_form import ServiceForm
-        if ServiceForm(parent=self).exec():
-            self.load_records()
-            self._status_bar.showMessage("Nowy rekord dodany.", 3000)
+        self._open_form(ServiceForm(), "Nowy rekord dodany.")
 
     @Slot()
     def _on_edit(self):
@@ -1198,9 +1204,7 @@ class MainWindow(QMainWindow):
             return
             
         from ui.service_form import ServiceForm
-        if ServiceForm(parent=self, record=rec).exec():
-            self.load_records()
-            self._status_bar.showMessage("Rekord zaktualizowany.", 3000)
+        self._open_form(ServiceForm(record=rec), "Rekord zaktualizowany.")
 
     @Slot()
     def _on_delete(self):

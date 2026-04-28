@@ -1609,7 +1609,7 @@ class SettingsWindow(QDialog):
         auto_row.addWidget(btn_auto_browse)
         bl.addLayout(auto_row)
 
-        note_auto = QLabel("ℹ  Kopia tworzona automatycznie przy każdym uruchomieniu aplikacji.")
+        note_auto = QLabel("ℹ  Kopia tworzona automatycznie przy każdym zamknięciu aplikacji.")
         note_auto.setStyleSheet("color: #64748b; font-size: 8pt;")
         bl.addWidget(note_auto)
 
