@@ -1,2 +1,0 @@
-Baza danych: C:\Users\filip.zarazinski\OneDrive - AddSecure\Desktop\aplikacja odbiory\files\data\odbiory.db
-Kopie zapasowe: C:\Users\filip.zarazinski\OneDrive - AddSecure\Desktop\aplikacja odbiory\files\data\backups
