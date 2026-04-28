@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtGui import QColor
 
 from database.db_manager import DatabaseManager
+from ui.widgets.montaz_tab import _ID_TO_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,15 @@ class SyncWorker(QThread):
 
 class MissingLibraryError(Exception):
     pass
+
+
+def _detect_device_model(device_id: str) -> str:
+    """Wykrywa model urządzenia na podstawie ID — ta sama logika co w formularzu."""
+    t = (device_id or "").strip()
+    for pattern, model in _ID_TO_MODEL:
+        if pattern.match(t):
+            return model
+    return ""
 
 
 # ── Worker thread do importu Odbiory.xlsb ─────────────────────────────────────
@@ -484,7 +494,7 @@ class OdbioryImportWorker(QThread):
             vehicle_type=_s("vehicle_type", 28),
             device_id=_s("device_id", 7),
             sim_number=_s("sim_number", 8),
-            device_model=_s("device_model", 27),
+            device_model=_detect_device_model(_s("device_id", 7)),
             firmware_tacho=_s("firmware_tacho", 17),
             recorder_location=_s("recorder_location", 18),
             mileage=mileage,
@@ -540,11 +550,12 @@ class SettingsWindow(QDialog):
 
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
+        tabs.addTab(self._build_general_tab(),         "  Ogólne  ")
         tabs.addTab(self._build_columns_tab(),         "  Kolumny  ")
         tabs.addTab(self._build_dicts_tab(),           "  Słowniki  ")
-        tabs.addTab(self._build_general_tab(),         "  Ustawienia  ")
         tabs.addTab(self._build_colors_tab(),          "  Kolory  ")
-        tabs.addTab(self._build_odbiory_import_tab(),  "  Import Odbiory  ")
+        tabs.addTab(self._build_odbiory_import_tab(),  "  Import z Excel  ")
+        tabs.addTab(self._build_about_tab(),           "  O aplikacji  ")
         root.addWidget(tabs, 1)
 
         btn_row = QHBoxLayout()
@@ -566,8 +577,8 @@ class SettingsWindow(QDialog):
         inner = QTabWidget()
         inner.setDocumentMode(True)
         inner.addTab(self._build_sim_tab(),              "  Baza SIM  ")
-        inner.addTab(self._build_zbiorcze_tab(),         "  Importy  ")
-        inner.addTab(self._build_bulk_import_widget(),   "  Import zbiorczy  ")
+        inner.addTab(self._build_zbiorcze_tab(),         "  Słowniki / Importy  ")
+        inner.addTab(self._build_bulk_import_widget(),   "  Zbiorczy import słowników  ")
         inner.currentChanged.connect(
             lambda idx: self._sim_dict_tab.ensure_loaded() if idx == 0 else None
         )
@@ -861,6 +872,34 @@ class SettingsWindow(QDialog):
             commit_fn=self._db.commit,
         )
 
+    # ---------------------------------------------------------------- Linki tab
+
+    def _build_linki_tab(self) -> QWidget:
+        from ui.dict_tab import DictTab
+
+        def excel_parser(ws):
+            headers = [str(cell.value or "").strip() for cell in next(ws.iter_rows(max_row=1))]
+            result = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                for col_idx, fleet in enumerate(headers):
+                    if not fleet:
+                        continue
+                    url = str(row[col_idx] or "").strip() if col_idx < len(row) else ""
+                    if url and url.lower() not in ("none", ""):
+                        result.append([fleet, url])
+            return result
+
+        return DictTab(
+            headers=["Flota", "Link"],
+            loader=self._db.get_all_fleet_links,
+            saver=lambda vals: self._db.upsert_fleet_link(vals[0], vals[1] if len(vals) > 1 else ""),
+            deleter=self._db.delete_fleet_link_by_id,
+            excel_sheet="Linki",
+            excel_parser=excel_parser,
+            add_labels=["Flota", "Link"],
+            commit_fn=self._db.commit,
+        )
+
     # ---------------------------------------------------------------- Zbiorczy import tab
 
     def _get_bulk_configs(self) -> list[dict]:
@@ -910,6 +949,18 @@ class SettingsWindow(QDialog):
                         result.append([device, fleet])
             return result
 
+        def parse_linki(ws):
+            headers = [str(cell.value or "").strip() for cell in next(ws.iter_rows(max_row=1))]
+            result = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                for col_idx, fleet in enumerate(headers):
+                    if not fleet:
+                        continue
+                    url = str(row[col_idx] or "").strip() if col_idx < len(row) else ""
+                    if url and url.lower() not in ("none", ""):
+                        result.append([fleet, url])
+            return result
+
         db = self._db
         return [
             {
@@ -948,6 +999,12 @@ class SettingsWindow(QDialog):
                 "parser": parse_extra_devices,
                 "saver": lambda v: db.upsert_extra_device(v[1] if len(v) > 1 else "", v[0]),
             },
+            {
+                "name": "Linki flot",
+                "sheet": "Linki",
+                "parser": parse_linki,
+                "saver": lambda v: db.upsert_fleet_link(v[0], v[1] if len(v) > 1 else ""),
+            },
         ]
 
     def _build_zbiorcze_tab(self) -> QWidget:
@@ -968,6 +1025,7 @@ class SettingsWindow(QDialog):
             ("Gdzie rejestrator",    self._build_loki_tab),
             ("Model urządzenia",     self._build_device_models_tab),
             ("Urządzenia dodatkowe", self._build_extra_devices_tab),
+            ("Linki flot",           self._build_linki_tab),
         ]:
             tab = build_fn()
             self._dict_tab_refs.append(tab)
@@ -1629,6 +1687,40 @@ class SettingsWindow(QDialog):
 
         return w
 
+    # ---------------------------------------------------------------- O aplikacji tab
+
+    def _build_about_tab(self) -> QWidget:
+        from PySide6.QtWidgets import QScrollArea
+        from changelog import CHANGELOG
+        from ui.whats_new_dialog import _render_release
+        from config import APP_VERSION
+
+        w = QWidget()
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        content = QWidget()
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(4)
+
+        for i, entry in enumerate(CHANGELOG[:5]):
+            if i > 0:
+                sep = QWidget()
+                sep.setFixedHeight(1)
+                sep.setStyleSheet("background: #2e3340; margin: 12px 0;")
+                lay.addWidget(sep)
+            _render_release(lay, entry, is_current=(entry["version"] == APP_VERSION))
+
+        lay.addStretch()
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
+        return w
+
     # ---------------------------------------------------------------- helpers – Auto backup
 
     def _on_auto_backup_browse(self):
@@ -1816,6 +1908,8 @@ class SettingsWindow(QDialog):
 
     def _on_duty_toggled(self, checked: bool):
         self._db.set_setting("show_duty_section", "1" if checked else "0")
+        self._db.set_setting("dyzur_highlight_enabled", "1" if checked else "0")
+        self._cb_dyzur_color.setChecked(checked)
 
     def _on_theme_toggled(self, checked: bool):
         self._db.set_setting("theme_mode", "light" if checked else "dark")

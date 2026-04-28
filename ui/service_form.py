@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
     QWidget, QPushButton, QMessageBox,
     QApplication
 )
-from PySide6.QtCore import Qt, Slot, QTimer, QSettings
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, Slot, QTimer, QSettings, QUrl
+from PySide6.QtGui import QKeySequence, QShortcut, QDesktopServices
 
 from config import FORM_WIDTH, FORM_HEIGHT
 from database.db_manager import DatabaseManager
@@ -103,7 +103,21 @@ class ServiceForm(QDialog):
             self._btn_duplicate.setToolTip("Duplikuj wpis (bez ID, SIM, CCID, sond i przebiegu)")
             f_lay.addWidget(self._btn_duplicate)
 
+        self._btn_fleet = QPushButton("🌐  Flota")
+        self._btn_fleet.setFixedHeight(_BTN_H)
+        self._btn_fleet.setMinimumWidth(110)
+        self._btn_fleet.setStyleSheet(_BTN_STYLE_NEUTRAL)
+        f_lay.addWidget(self._btn_fleet)
+
         f_lay.addStretch()
+
+        if not self._edit_mode:
+            self._btn_paste_json = QPushButton("📥  Wklej z JSON")
+            self._btn_paste_json.setFixedHeight(_BTN_H)
+            self._btn_paste_json.setMinimumWidth(120)
+            self._btn_paste_json.setStyleSheet(_BTN_STYLE_NEUTRAL)
+            self._btn_paste_json.setToolTip("Wczytaj dane formularza z JSON (tylko w pustym formularzu)")
+            f_lay.addWidget(self._btn_paste_json)
 
         self._btn_json = QPushButton("📋  Kopiuj JSON")
         self._btn_json.setFixedHeight(_BTN_H)
@@ -132,14 +146,165 @@ class ServiceForm(QDialog):
         self._btn_save.clicked.connect(self._on_save)
         self._btn_cancel.clicked.connect(self.reject)
         self._btn_json.clicked.connect(self._on_copy_json)
+        self._btn_fleet.clicked.connect(self._on_open_fleet)
+        self._tab_montaz._fleet_name_edit.textChanged.connect(self._on_fleet_changed)
         if self._edit_mode:
             self._btn_duplicate.clicked.connect(self._on_duplicate)
+        else:
+            self._btn_paste_json.clicked.connect(self._on_paste_json)
         self.finished.connect(self._save_form_size)
 
     def _save_form_size(self):
         s = QSettings("TwojaFirma", "SystemOdbiory")
         s.setValue("form/width", self.width())
         s.setValue("form/height", self.height())
+
+    def _on_fleet_changed(self, fleet: str):
+        f = fleet.strip()
+        if f:
+            self._btn_fleet.setText(f"🌐  Flota {f}")
+            self._btn_fleet.setToolTip(f"Otwórz instalacje w FleetVision {f}")
+            self._btn_fleet.setEnabled(True)
+        else:
+            self._btn_fleet.setText("🌐  Flota")
+            self._btn_fleet.setToolTip("Brak przypisanej floty")
+            self._btn_fleet.setEnabled(False)
+
+    def _on_open_fleet(self):
+        self._tab_montaz.collect_to_record(self._record)
+        fleet = (self._record.fleet_name or "").strip()
+        if not fleet:
+            return
+        url = self._db.get_url_for_fleet(fleet)
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+        else:
+            QMessageBox.information(
+                self, "Brak linku",
+                f"Nie znaleziono linku dla floty \"{fleet}\".\n"
+                "Dodaj go w Ustawienia → Slownniki → Linki flot."
+            )
+
+    def _on_paste_json(self):
+        if self._is_dirty():
+            QMessageBox.warning(
+                self, "Formularz nie jest pusty",
+                "Wyczysc formularz przed wczytaniem JSON."
+            )
+            return
+
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QDialogButtonBox
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Wklej JSON")
+        dlg.setMinimumSize(480, 300)
+        lay = QVBoxLayout(dlg)
+        txt = QPlainTextEdit()
+        txt.setPlaceholderText("Wklej tutaj JSON skopiowany z formularza...")
+        lay.addWidget(txt)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        raw = txt.toPlainText().strip()
+        if not raw:
+            return
+        try:
+            data = __import__("json").loads(raw)
+        except Exception:
+            QMessageBox.warning(self, "Blad", "Nieprawidlowy JSON.")
+            return
+
+        rec = self._json_to_record(data)
+        self._tab_montaz.load_from_record(rec)
+        self._record = rec
+        self._original_record = __import__("copy").deepcopy(rec)
+        self._tab_montaz.collect_to_record(self._original_record)
+
+    @staticmethod
+    def _json_to_record(j: dict) -> "ServiceRecord":
+        from database.models import ServiceRecord
+        rec = ServiceRecord()
+
+        raw_date = j.get("data", "")
+        if raw_date and "." in raw_date:
+            parts = raw_date.split(".")
+            if len(parts) == 3:
+                raw_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        rec.service_date = raw_date
+
+        rec.record_type    = j.get("typ", "")
+        rec.company_name   = j.get("firma", "")
+        rec.fleet_name     = j.get("flota", "")
+        rec.license_plate  = j.get("nrRejestracyjny", "")
+        rec.side_number    = j.get("nrBoczny", "")
+        rec.device_id      = j.get("id", "")
+        rec.sim_number     = j.get("sim", "")
+        rec.vehicle_type   = j.get("typPojazdu", "")
+        rec.device_model   = j.get("modelUrzadzenia", "")
+        rec.technician_name = j.get("monter", "")
+        rec.recorder_location = j.get("gdzieRejestrator", "")
+        rec.comment        = j.get("komentarzDoProtokolu", "")
+        rec.right_tank_probe = j.get("prawyZbiornik", False)
+        rec.has_tablet     = bool(j.get("tablet", False))
+        rec.tablet_sn      = j.get("tabletNr", "")
+        rec.has_power      = bool(j.get("zasilanie", False))
+        rec.has_rfid       = bool(j.get("rfid", False))
+        rec.has_immo       = bool(j.get("immo", False))
+        rec.probe1_id      = j.get("an0Numer", "")
+        rec.probe2_id      = j.get("an1Numer", "")
+
+        try:
+            rec.service_hour = int(j.get("godzina", 0))
+        except (ValueError, TypeError):
+            rec.service_hour = 0
+        try:
+            rec.service_minute = int(j.get("minuta", 0))
+        except (ValueError, TypeError):
+            rec.service_minute = 0
+        try:
+            mileage = j.get("przebieg", "")
+            rec.mileage = int(mileage) if mileage not in ("", None) else None
+        except (ValueError, TypeError):
+            rec.mileage = None
+
+        marka = j.get("marka", "")
+        model = j.get("model", "")
+        rec.vehicle_brand = f"{marka} {model}".strip()
+
+        model_tacho = j.get("modelTacho", "")
+        wersja_tacho = j.get("wersjaTacho", "")
+        rec.firmware_tacho = f"{model_tacho} {wersja_tacho}".strip()
+
+        try:
+            rec.duty_time_min = int(j.get("czasDyzuru")) if j.get("czasDyzuru") not in ("", None) else None
+        except (ValueError, TypeError):
+            rec.duty_time_min = None
+
+        sondy = {}
+        for key in ("an0Pojemnosc", "an0Skalowanie", "an1Pojemnosc", "an1Skalowanie"):
+            if j.get(key) not in (None, ""):
+                sondy[key] = j[key]
+
+        add_cfg = {}
+        if j.get("ccid"):
+            add_cfg["ccid"] = j["ccid"]
+        if j.get("przekladkaZ"):
+            add_cfg["przekladkaRej"] = j["przekladkaZ"]
+
+        rec.config_json = {
+            "canConfig":       j.get("canConfig", {}),
+            "dinConfig":       j.get("dinConfig", {}),
+            "additionalConfig": add_cfg,
+            "odebrane":        j.get("odebrane", False),
+            "dyzurZaznaczony": j.get("dyzur", False),
+            "komentarzPrywatny": j.get("komentarzPrywatny", ""),
+            "sondyRaw":        sondy,
+        }
+        return rec
 
     def keyPressEvent(self, event):
         """Nadpisanie eventu aby ignorować puste wciśnięcia Enter (zapobiega niechcianym akcjom)."""

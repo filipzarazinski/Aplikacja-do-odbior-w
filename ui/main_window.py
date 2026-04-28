@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
     QDateEdit, QFrame, QAbstractItemView, QApplication,
     QStyledItemDelegate, QStyleOptionViewItem, QStyle
 )
-from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint
-from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush
+from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint, QUrl
+from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QDesktopServices
 
 from config import APP_NAME, APP_VERSION, MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT
 from database.db_manager import DatabaseManager
@@ -1035,11 +1035,27 @@ class MainWindow(QMainWindow):
         selected_rows = self._get_selected_rows()
         if not selected_rows:
             return
-            
+
         menu = QMenu(self)
-        act = menu.addAction(f"📋  Kopiuj do dyżurów ({len(selected_rows)} wierszy)")
-        act.triggered.connect(lambda: self._copy_duty_info(selected_rows))
-        menu.exec(self._table.viewport().mapToGlobal(pos))
+
+        if len(selected_rows) == 1:
+            rec_id = self._get_record_id_for_row(selected_rows[0])
+            rec = self._db.get_record_by_id(rec_id) if rec_id is not None else None
+            fleet = (rec.fleet_name or "").strip() if rec else ""
+            url = self._db.get_url_for_fleet(fleet) if fleet else ""
+            label = f"🌐  Przejdź do floty {fleet}" if fleet else "🌐  Przejdź do floty"
+            act_fleet = menu.addAction(label)
+            act_fleet.setEnabled(bool(url))
+            if url:
+                act_fleet.triggered.connect(lambda *_, u=url: QDesktopServices.openUrl(QUrl(u)))
+            menu.addSeparator()
+
+        if self._db.get_setting("show_duty_section", "1") == "1":
+            act = menu.addAction(f"📋  Kopiuj do dyżurów ({len(selected_rows)} wierszy)")
+            act.triggered.connect(lambda: self._copy_duty_info(selected_rows))
+
+        if not menu.isEmpty():
+            menu.exec(self._table.viewport().mapToGlobal(pos))
 
     def _copy_duty_info(self, rows: list):
         lines = []

@@ -168,6 +168,12 @@ def main() -> int:
         _checker.update_available.connect(_on_update)
         _checker.start()
 
+        last_seen = db.get_setting("last_seen_version", "")
+        if last_seen != APP_VERSION:
+            from ui.whats_new_dialog import WhatsNewDialog
+            WhatsNewDialog(APP_VERSION, window).exec()
+            db.set_setting("last_seen_version", APP_VERSION)
+
     except Exception as exc:
         logger.critical(f"Błąd okna głównego: {exc}", exc_info=True)
         QMessageBox.critical(None, "Błąd krytyczny", f"Nie można otworzyć aplikacji:\n{exc}")

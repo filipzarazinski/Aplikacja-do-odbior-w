@@ -289,6 +289,37 @@ class DatabaseManager:
         return cur.rowcount > 0
 
     # ============================================================
+    # SŁOWNIKI – Fleet links
+    # ============================================================
+
+    def get_all_fleet_links(self) -> list[tuple]:
+        """Zwraca [(id, fleet_name, url)] posortowane po fleet_name."""
+        rows = self._conn.execute(
+            "SELECT id, fleet_name, url FROM fleet_links ORDER BY fleet_name COLLATE NOCASE"
+        ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def get_url_for_fleet(self, fleet_name: str) -> str:
+        """Zwraca URL dla podanej floty lub pusty string jeśli nie znaleziono."""
+        row = self._conn.execute(
+            "SELECT url FROM fleet_links WHERE fleet_name = ? COLLATE NOCASE",
+            (fleet_name.strip(),),
+        ).fetchone()
+        return row[0] if row else ""
+
+    def upsert_fleet_link(self, fleet_name: str, url: str) -> None:
+        self._conn.execute(
+            """INSERT INTO fleet_links (fleet_name, url) VALUES (?, ?)
+               ON CONFLICT(fleet_name) DO UPDATE SET url=excluded.url""",
+            (fleet_name.strip(), url.strip()),
+        )
+
+    def delete_fleet_link_by_id(self, link_id: int) -> bool:
+        cur = self._conn.execute("DELETE FROM fleet_links WHERE id = ?", (link_id,))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    # ============================================================
     # SIM CARDS
     # ============================================================
 
