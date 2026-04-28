@@ -1692,8 +1692,7 @@ class SettingsWindow(QDialog):
     def _build_about_tab(self) -> QWidget:
         from PySide6.QtWidgets import QScrollArea
         from changelog import CHANGELOG
-        from ui.whats_new_dialog import _render_release
-        from config import APP_VERSION
+        from ui.whats_new_dialog import _make_collapsible_section
 
         w = QWidget()
         outer = QVBoxLayout(w)
@@ -1705,16 +1704,16 @@ class SettingsWindow(QDialog):
 
         content = QWidget()
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(24, 20, 24, 20)
-        lay.setSpacing(4)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(0)
 
         for i, entry in enumerate(CHANGELOG[:5]):
             if i > 0:
                 sep = QWidget()
                 sep.setFixedHeight(1)
-                sep.setStyleSheet("background: #2e3340; margin: 12px 0;")
+                sep.setStyleSheet("background: #2e3340; margin: 4px 0;")
                 lay.addWidget(sep)
-            _render_release(lay, entry, is_current=(entry["version"] == APP_VERSION))
+            _make_collapsible_section(lay, entry, expanded=(i == 0))
 
         lay.addStretch()
         scroll.setWidget(content)

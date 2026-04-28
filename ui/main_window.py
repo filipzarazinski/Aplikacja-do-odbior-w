@@ -10,7 +10,7 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QPushButton, QLineEdit, QLabel,
+    QPushButton, QLineEdit, QLabel, QToolTip,
     QStatusBar, QToolBar, QMessageBox, QMenu,
     QDateEdit, QFrame, QAbstractItemView, QApplication,
     QStyledItemDelegate, QStyleOptionViewItem, QStyle
@@ -486,9 +486,13 @@ class MainWindow(QMainWindow):
         lay.setAlignment(Qt.AlignVCenter)
         lay.setSpacing(12)
 
-        lbl = QLabel("SZUKAJ")
-        lbl.setStyleSheet(lbl_q.styleSheet())
-        lay.addWidget(lbl)
+        self._btn_search_label = QPushButton("SZUKAJ")
+        self._btn_search_label.setStyleSheet(
+            lbl_q.styleSheet() + "QPushButton { cursor: pointer; } QPushButton:hover { color: #94a3b8; }"
+        )
+        self._btn_search_label.setFlat(True)
+        self._btn_search_label.setCursor(Qt.PointingHandCursor)
+        lay.addWidget(self._btn_search_label)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
@@ -496,17 +500,80 @@ class MainWindow(QMainWindow):
         lay.addWidget(sep)
 
         self._filter_search = QLineEdit()
-        self._filter_search.setPlaceholderText("Wpisz tekst... (lub kolumna:wartość np. dyżur:)")
-        self._filter_search.setToolTip(
-            "Wpisz tekst, aby przeszukać wszystkie pola.\n"
-            "Aby przeszukać konkretną kolumnę, wpisz jej nazwę i dwukropek:\n"
-            " • 'firma:abc' -> Szuka 'abc' tylko w kolumnie Firma\n"
-            " • 'dyżur:' -> Szuka wierszy, które mają pustą kolumnę Dyżur\n"
-            " • 'czas:' -> Szuka pustych w kolumnie Czas dyżuru"
-        )
+        self._filter_search.setPlaceholderText("Wpisz tekst...")
         self._filter_search.setMinimumWidth(350)
         self._filter_search.setClearButtonEnabled(True)
         lay.addWidget(self._filter_search)
+
+        _FILTER_HELP = (
+            "<b>Dowolny tekst</b> &mdash; szuka we wszystkich kolumnach:<br>"
+            "&nbsp;&nbsp;<code>Kowalski</code>"
+            " &nbsp;&rarr;&nbsp; wiersze zawierające &ldquo;Kowalski&rdquo; gdziekolwiek<br>"
+            "&nbsp;&nbsp;<code>!Montaż</code>"
+            " &nbsp;&rarr;&nbsp; wiersze niezawierające &ldquo;Montaż&rdquo; nigdzie<br>"
+            "&nbsp;&nbsp;<code>Kowalski,Nowak</code>"
+            " &nbsp;&rarr;&nbsp; zawiera &ldquo;Kowalski&rdquo; lub &ldquo;Nowak&rdquo;<br><br>"
+
+            "<b>Filtr kolumnowy</b> &nbsp;<code>kolumna:wartość</code><br>"
+            "&nbsp;&nbsp;<code>firma:Transport ABC</code>"
+            " &nbsp;&rarr;&nbsp; firma zawiera &ldquo;Transport ABC&rdquo;<br>"
+            "&nbsp;&nbsp;<code>typ:Montaż</code>"
+            " &nbsp;&rarr;&nbsp; tylko typ Montaż<br><br>"
+
+            "<b>Puste pole</b> &nbsp;<code>kolumna:</code><br>"
+            "&nbsp;&nbsp;<code>flota:</code>"
+            " &nbsp;&rarr;&nbsp; wiersze bez przypisanej floty<br><br>"
+
+            "<b>Wykluczenie</b> &nbsp;<code>kolumna:!wartość</code><br>"
+            "&nbsp;&nbsp;<code>typ:!Telefon</code>"
+            " &nbsp;&rarr;&nbsp; wszystko oprócz Telefon<br>"
+            "&nbsp;&nbsp;<code>flota:!FM1</code>"
+            " &nbsp;&rarr;&nbsp; wszystkie floty poza FM1<br><br>"
+
+            "<b>LUB &nbsp;( , )</b> &nbsp;&mdash; wartości tej samej kolumny:<br>"
+            "&nbsp;&nbsp;<code>typ:Montaż,Serwis</code>"
+            " &nbsp;&rarr;&nbsp; typ Montaż lub Serwis<br>"
+            "&nbsp;&nbsp;<code>flota:FM1,FM2,FM3</code>"
+            " &nbsp;&rarr;&nbsp; jedna z trzech flot<br><br>"
+
+            "<b>LUB &nbsp;( , )</b> &nbsp;&mdash; różne kolumny:<br>"
+            "&nbsp;&nbsp;<code>typ:Montaż,firma:ACME</code>"
+            " &nbsp;&rarr;&nbsp; typ=Montaż lub firma=ACME<br><br>"
+
+            "<b>AND &nbsp;( ; )</b> &nbsp;&mdash; oba warunki muszą być spełnione:<br>"
+            "&nbsp;&nbsp;<code>firma:ABC;typ:Montaż</code>"
+            " &nbsp;&rarr;&nbsp; firma ABC i typ Montaż<br>"
+            "&nbsp;&nbsp;<code>typ:!Telefon;flota:FM2</code>"
+            " &nbsp;&rarr;&nbsp; nie Telefon, tylko flota FM2<br><br>"
+
+            "<b>Łączenie warunków</b><br>"
+            "&nbsp;&nbsp;<code>typ:Montaż,Serwis;firma:ABC</code>"
+            " &nbsp;&rarr;&nbsp; (Montaż lub Serwis) i firma ABC<br>"
+            "&nbsp;&nbsp;<code>typ:!Telefon;flota:FM1,FM2</code>"
+            " &nbsp;&rarr;&nbsp; nie Telefon, i flota FM1 lub FM2<br>"
+            "&nbsp;&nbsp;<code>Transport ABC;typ:Montaż;flota:!FM3</code>"
+            " &nbsp;&rarr;&nbsp; zawiera &ldquo;Transport ABC&rdquo;, typ Montaż, poza flotą FM3"
+        )
+
+        class _InfoBadge(QLabel):
+            def __init__(self, tip: str, parent=None):
+                super().__init__("i", parent)
+                self._tip = tip
+                self.setFixedSize(16, 16)
+                self.setAlignment(Qt.AlignCenter)
+                self.setCursor(Qt.WhatsThisCursor)
+                self.setStyleSheet(
+                    "QLabel { color: #94a3b8; font-size: 8pt; font-weight: 700;"
+                    " border: 1px solid #475569; border-radius: 8px;"
+                    " background: transparent; padding: 0; }"
+                    "QLabel:hover { color: #e2e8f0; border-color: #94a3b8; }"
+                )
+
+            def enterEvent(self, event):
+                QToolTip.showText(self.mapToGlobal(self.rect().bottomLeft()), self._tip, self)
+                super().enterEvent(event)
+
+        lay.addWidget(_InfoBadge(_FILTER_HELP))
 
         lay.addWidget(QLabel("Od"))
         self._filter_date_from = QDateEdit()
@@ -703,6 +770,7 @@ class MainWindow(QMainWindow):
         self._btn_filter.clicked.connect(self._on_filter)
         self._btn_clear.clicked.connect(self._on_clear_filter)
         self._filter_search.returnPressed.connect(self._on_filter)
+        self._btn_search_label.clicked.connect(self._on_filter)
 
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         self._table.doubleClicked.connect(self._on_double_clicked)
@@ -732,36 +800,69 @@ class MainWindow(QMainWindow):
                 if "date_to" in filters and r.service_date and r.service_date > filters["date_to"]:
                     continue
                 if "smart_search" in filters:
-                    search_terms = filters["smart_search"].split()
+                    search_terms = [t.strip() for t in filters["smart_search"].split(";") if t.strip()]
                     match_all = True
                     searchable_text = None
 
+                    def _resolve_attrs(hint):
+                        exact = [a for lbl, a, _ in ALL_COLUMNS if hint == lbl.lower()]
+                        return exact or [a for lbl, a, _ in ALL_COLUMNS if hint in lbl.lower()]
+
+                    def _cell_matches(attr, cmp_val, negate):
+                        cell_val = str(_get_cell_value(r, attr)).lower().strip()
+                        hit = (cmp_val == "" and cell_val == "") or (cmp_val != "" and cmp_val in cell_val)
+                        return (not hit) if negate else hit
+
                     for term in search_terms:
                         if ":" in term and not term.startswith(":"):
-                            col_hint, val_hint = term.split(":", 1)
-                            
-                            # Najpierw szukamy dokładnego dopasowania (aby "dyżur:" nie łapało "Czas dyżuru")
-                            matched_attrs = [attr for lbl, attr, _ in ALL_COLUMNS if col_hint == lbl.lower()]
-                            if not matched_attrs:
-                                # Jeśli nie ma dokładnego, szukamy częściowego
-                                matched_attrs = [attr for lbl, attr, _ in ALL_COLUMNS if col_hint in lbl.lower()]
-                            
-                            if matched_attrs:
-                                term_matched = False
-                                for attr in matched_attrs:
-                                    cell_val = str(_get_cell_value(r, attr)).lower().strip()
-                                    # Znajduje puste komórki LUB takie, które zawierają daną frazę
-                                    if (val_hint == "" and cell_val == "") or (val_hint != "" and val_hint in cell_val):
-                                        term_matched = True
-                                        break
+                            # Split by comma; each part is either col:val (new column)
+                            # or a bare value (extends the previous column). All parts are OR'd.
+                            comma_parts = term.split(",")
+                            first_col, first_val = comma_parts[0].split(":", 1)
+                            last_attrs = _resolve_attrs(first_col.strip())
+
+                            if last_attrs:
+                                or_conditions = []
+                                negate = first_val.startswith("!")
+                                or_conditions.append((last_attrs, first_val[1:].lower() if negate else first_val.lower(), negate))
+
+                                for part in comma_parts[1:]:
+                                    part = part.strip()
+                                    if not part:
+                                        continue
+                                    if ":" in part and not part.startswith(":"):
+                                        ch, vh = part.split(":", 1)
+                                        attrs = _resolve_attrs(ch.strip())
+                                        if attrs:
+                                            last_attrs = attrs
+                                            negate = vh.startswith("!")
+                                            or_conditions.append((last_attrs, vh[1:].lower() if negate else vh.lower(), negate))
+                                    else:
+                                        negate = part.startswith("!")
+                                        or_conditions.append((last_attrs, part[1:].lower() if negate else part.lower(), negate))
+
+                                term_matched = any(
+                                    _cell_matches(attr, cmp, neg)
+                                    for (attrs, cmp, neg) in or_conditions
+                                    for attr in attrs
+                                )
                                 if not term_matched:
                                     match_all = False
                                     break
                                 continue
-                        
+
                         if searchable_text is None:
                             searchable_text = " ".join(str(_get_cell_value(r, attr)).lower() for attr in _ALL_ATTRS_ORDERED if attr != "_json")
-                        if term not in searchable_text:
+                        or_vals = [v.strip() for v in term.split(",") if v.strip()]
+                        term_ok = False
+                        for ov in or_vals:
+                            neg = ov.startswith("!")
+                            cmp = ov[1:].lower() if neg else ov.lower()
+                            hit = cmp in searchable_text
+                            if (not hit) if neg else hit:
+                                term_ok = True
+                                break
+                        if not term_ok:
                             match_all = False
                             break
                             
@@ -1115,6 +1216,14 @@ class MainWindow(QMainWindow):
         self._filter_date_to.setDate(QDate(today.year(), 12, 31))
         self._on_filter()
 
+    @Slot()
+    def _on_q_no_phone(self):
+        current_search = self._filter_search.text().strip()
+        terms = [t for t in current_search.split() if not t.lower().startswith("typ:")]
+        terms.append("typ:!Telefon")
+        self._filter_search.setText(" ".join(terms))
+        self._on_filter()
+
     @Slot(bool)
     def _on_q_duty(self, only_duty: bool):
         current_search = self._filter_search.text().strip()
@@ -1165,9 +1274,12 @@ class MainWindow(QMainWindow):
         new_rec.service_hour = h_mod
         new_rec.service_minute = m_mod
         new_rec.license_plate = ""
+        new_rec.side_number = ""
         new_rec.device_id = ""
         new_rec.sim_number = ""
+        new_rec.device_model = ""
         new_rec.mileage = None
+        new_rec.tablet_sn = ""
         new_rec.probe1_id = ""
         new_rec.probe1_capacity = None
         new_rec.probe1_length = None
@@ -1177,10 +1289,13 @@ class MainWindow(QMainWindow):
         new_rec.config_json = copy.deepcopy(rec.config_json)
         new_rec.config_json.get("additionalConfig", {}).pop("ccid", None)
         new_rec.config_json["odebrane"] = False
-        
+
         is_weekend = now.weekday() >= 5
         is_duty_time = h_mod >= 15 or h_mod < 6 or (h_mod == 6 and m_mod <= 55)
         new_rec.config_json["dyzurZaznaczony"] = is_weekend or is_duty_time
+
+        from ui.service_form import _clear_din_sns
+        _clear_din_sns(new_rec.config_json)
 
         try:
             self._db.insert_record(new_rec)
@@ -1195,6 +1310,8 @@ class MainWindow(QMainWindow):
         self._open_forms.append(form)
         form.accepted.connect(lambda: (self.load_records(),
                                        self._status_bar.showMessage(success_msg, 3000)))
+        form.record_duplicated.connect(lambda: (self.load_records(),
+                                                self._status_bar.showMessage("Rekord zduplikowany i dodany do tabeli.", 4000)))
         form.finished.connect(lambda: self._open_forms.remove(form)
                               if form in self._open_forms else None)
         form.show()

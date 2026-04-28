@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget, QPushButton, QMessageBox,
     QApplication
 )
-from PySide6.QtCore import Qt, Slot, QTimer, QSettings, QUrl
+from PySide6.QtCore import Qt, Slot, QTimer, QSettings, QUrl, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QDesktopServices
 
 from config import FORM_WIDTH, FORM_HEIGHT
@@ -23,7 +23,19 @@ from ui.widgets.montaz_tab import MontazTab
 logger = logging.getLogger(__name__)
 
 
+def _clear_din_sns(cfg: dict) -> None:
+    """Czyści numery seryjne z dinConfig dla wpisów z zabezpieczeniem/wlewem."""
+    din_cfg = cfg.get("dinConfig", {})
+    for key in ("din2", "din3", "din4", "din5"):
+        entry = din_cfg.get(key, {})
+        nazwa = (entry.get("nazwa") or "").lower()
+        if "zabezpieczenie" in nazwa or "wlew" in nazwa:
+            entry.pop("sn", None)
+
+
 class ServiceForm(QDialog):
+
+    record_duplicated = Signal()
 
     def __init__(self, parent=None, record: Optional[ServiceRecord] = None):
         super().__init__(parent)
@@ -100,7 +112,7 @@ class ServiceForm(QDialog):
             self._btn_duplicate.setFixedHeight(_BTN_H)
             self._btn_duplicate.setMinimumWidth(100)
             self._btn_duplicate.setStyleSheet(_BTN_STYLE_NEUTRAL)
-            self._btn_duplicate.setToolTip("Duplikuj wpis (bez ID, SIM, CCID, sond i przebiegu)")
+            self._btn_duplicate.setToolTip("Duplikuj wpis (czyści: ID, SIM, CCID, nr boczny, model urządzenia, nr tabletu, sondy, numery seryjne zabezpieczeń)")
             f_lay.addWidget(self._btn_duplicate)
 
         self._btn_fleet = QPushButton("🌐  Flota")
@@ -396,61 +408,50 @@ class ServiceForm(QDialog):
         h_mod = _h % 24
         m_mod = _m % 60
         new_rec = ServiceRecord(
-            # Identyfikacja — data/godzina aktualne (zaokrąglone do 5 min)
             record_type=src.record_type,
             service_date=now.strftime("%Y-%m-%d"),
             service_hour=h_mod,
             service_minute=m_mod,
-            # Firma i pojazd — kopiowane
             company_name=src.company_name,
             fleet_name=src.fleet_name,
             license_plate="",
-            side_number=src.side_number,
+            side_number="",
             vehicle_brand=src.vehicle_brand,
             vehicle_type=src.vehicle_type,
-            # Urządzenie — ID, SIM czyszczone
             device_id="",
             sim_number="",
-            device_model=src.device_model,
-            # Tacho
+            device_model="",
             firmware_tacho=src.firmware_tacho,
             recorder_location=src.recorder_location,
             mileage=None,
-            # Sondy — czyszczone
             probe1_id="", probe1_capacity=None, probe1_length=None,
             probe2_id="", probe2_capacity=None, probe2_length=None,
             right_tank_probe=src.right_tank_probe,
-            # CAN
             can_active=src.can_active,
             can_checkboxes=list(src.can_checkboxes),
             can_vehicle_type=src.can_vehicle_type,
-            # Dodatkowe
             has_rfid=src.has_rfid,
             has_immo=src.has_immo,
             has_tablet=src.has_tablet,
-            tablet_sn=src.tablet_sn,
+            tablet_sn="",
             has_power=src.has_power,
-            # Technician & komentarz
             technician_name=src.technician_name,
             comment=src.comment,
             duty_time_min=src.duty_time_min,
         )
 
-        # Kopiuj config_json bez CCID i bez odebrane
         cfg = copy.deepcopy(src.config_json)
         cfg.get("additionalConfig", {}).pop("ccid", None)
         cfg["odebrane"] = False
         is_weekend = now.weekday() >= 5
         is_duty_time = h_mod >= 15 or h_mod < 6 or (h_mod == 6 and m_mod <= 55)
         cfg["dyzurZaznaczony"] = is_weekend or is_duty_time
+        _clear_din_sns(cfg)
         new_rec.config_json = cfg
 
         try:
             self._db.insert_record(new_rec)
-            QMessageBox.information(
-                self, "Duplikat dodany",
-                f"Zduplikowano rekord.\nNowy wpis pojawi się w tabeli po odświeżeniu.",
-            )
+            self.record_duplicated.emit()
         except Exception as exc:
             logger.error(f"Błąd duplikowania: {exc}", exc_info=True)
             QMessageBox.critical(self, "Błąd", f"Nie udało się zduplikować:\n{exc}")

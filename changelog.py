@@ -2,6 +2,27 @@
 
 CHANGELOG = [
     {
+        "version": "1.1.2",
+        "date": "2026-04-28",
+        "entries": [
+            ("Formularz", [
+                "Duplikuj nie kopiuje już numeru bocznego, modelu urządzenia, numeru tabletu ani numerów seryjnych zabezpieczeń wlewu paliwa",
+                "Po duplikowaniu z formularza tabela odświeża się automatycznie",
+            ]),
+            ("Wyszukiwarka", [
+                "Wprowadzono rozbudowane modyfikacje silnika wyszukiwania - przycisk SZUKAJ dziala, dodano ikone (i) z podpowiedzia skladni.",
+                "AND (srednik): 'Transport ABC;typ:Montaz' - fraza z spacjami i filtr kolumnowy jednoczesnie",
+                "LUB w kolumnie (przecinek): 'typ:Montaz,Serwis' - typ Montaz lub Serwis",
+                "LUB miedzy kolumnami (przecinek): 'typ:Montaz,firma:ACME' - typ Montaz lub firma ACME",
+                "Negacja: '!Telefon' wyklucza globalnie, 'typ:!Telefon' wyklucza w kolumnie typ",
+            ]),
+            ("O aplikacji", [
+                "Historia wersji wyświetlana jako zwijana lista - kliknij wersję żeby zobaczyć zmiany",
+                "Przy aktualizacji przez kilka wersji jednocześnie widoczne są wszystkie zmiany od ostatniej posiadanej wersji",
+            ]),
+        ],
+    },
+    {
         "version": "1.1.1",
         "date": "2026-04-28",
         "entries": [
