@@ -135,25 +135,65 @@ class CustomTableWidget(QTableWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._drag_blocked = False
+        self._mid_scroll_active = False
+        self._mid_scroll_last_x = 0
+        self._mid_scroll_last_y = 0
+        self._mid_scroll_acc_x = 0
+        self._mid_scroll_acc_y = 0
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self._mid_scroll_active = True
+            self._mid_scroll_last_x = int(event.position().x())
+            self._mid_scroll_last_y = int(event.position().y())
+            self._mid_scroll_acc_x = 0
+            self._mid_scroll_acc_y = 0
+            self.setCursor(Qt.SizeAllCursor)
+            event.accept()
+            return
+
         item = self.itemAt(event.pos())
         restore_mode = None
-        
+
         if item and item.data(Qt.UserRole + 1) == "no_select":
             self._drag_blocked = True
             restore_mode = self.selectionMode()
             self.setSelectionMode(QAbstractItemView.NoSelection)
         else:
             self._drag_blocked = False
-        
+
         super().mousePressEvent(event)
-        
+
         if restore_mode is not None:
             self.setSelectionMode(restore_mode)
 
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self._mid_scroll_active = False
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
     def mouseMoveEvent(self, event):
-        # Blokujemy zaznaczanie przeciąganiem (drag), jeśli rozpoczęliśmy klik od zablokowanej komórki
+        if self._mid_scroll_active:
+            x = int(event.position().x())
+            y = int(event.position().y())
+            self._mid_scroll_acc_x += x - self._mid_scroll_last_x
+            self._mid_scroll_acc_y += y - self._mid_scroll_last_y
+            self._mid_scroll_last_x = x
+            self._mid_scroll_last_y = y
+            DIVISOR = 15
+            step_x = self._mid_scroll_acc_x // DIVISOR
+            step_y = self._mid_scroll_acc_y // DIVISOR
+            if step_x:
+                self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + step_x)
+                self._mid_scroll_acc_x -= step_x * DIVISOR
+            if step_y:
+                self.verticalScrollBar().setValue(self.verticalScrollBar().value() + step_y)
+                self._mid_scroll_acc_y -= step_y * DIVISOR
+            event.accept()
+            return
         if self._drag_blocked:
             return
         super().mouseMoveEvent(event)
@@ -1328,6 +1368,8 @@ class MainWindow(QMainWindow):
         if new_id is not None:
             for existing in self._open_forms:
                 if getattr(existing, '_edit_mode', False) and existing._record.id == new_id:
+                    if existing.isMinimized():
+                        existing.showNormal()
                     existing.raise_()
                     existing.activateWindow()
                     form.deleteLater()

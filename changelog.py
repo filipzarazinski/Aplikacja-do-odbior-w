@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.1.4",
+        "date": "2026-04-29",
+        "entries": [
+            ("Lista główna", [
+                "Przytrzymanie środkowego przycisku myszy (scrolla) i ruch myszką przewija tabelę w dowolnym kierunku – w lewo, prawo, górę i dół",
+            ]),
+        ],
+    },
+    {
         "version": "1.1.3",
         "date": "2026-04-29",
         "entries": [

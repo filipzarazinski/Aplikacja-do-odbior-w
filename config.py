@@ -31,7 +31,7 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Metadane aplikacji ---
 APP_NAME = "Odbiory - System Zarządzania Montażami"
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.1.4"
 APP_AUTHOR = "filipzarazinski"
 
 # --- GitHub / Aktualizacje ---
@@ -72,7 +72,7 @@ CAN_CONNECTION_CAR   = "bramkafms"
 VEHICLE_TYPES = ["Ciężarowy", "Osobowy", "Maszyna", "Naczepa"]
 
 # Opcje D8 (podłączenie tachografu) – z formInitialize.bas → ComboBox3
-D8_OPTIONS = ["Tachoreader", "FMB640/FMC650", "Brak"]
+D8_OPTIONS = ["Tachoreader", "FMB640/FMC650"]
 
 # Marki tachografu – z formEdit.bas i Submit.bas
 TACHO_BRANDS_TACHOREADER  = ["Siemens", "Stonerige"]

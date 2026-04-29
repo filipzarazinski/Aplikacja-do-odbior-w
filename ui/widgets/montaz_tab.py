@@ -441,7 +441,7 @@ class MontazTab(QWidget):
         self._tacho_grp.setVisible(False)
         d8_l.addWidget(self._tacho_grp)
 
-        self._fmb_grp = QGroupBox("TACHO FMB")
+        self._fmb_grp = QGroupBox("TELTONIKA")
         self._fmb_grp.setStyleSheet(_GRP_STYLE)
         fg = QVBoxLayout(self._fmb_grp); fg.setSpacing(4)
         fg_rb_lay = QHBoxLayout()
@@ -454,7 +454,7 @@ class MontazTab(QWidget):
         fg_rb_lay.addStretch()
         fg.addLayout(fg_rb_lay)
         fg_ver_lay = QHBoxLayout()
-        fg_ver_lay.addWidget(_lbl("Wer.:"))
+        fg_ver_lay.addWidget(_lbl("Tachocheck:"))
         self._tacho_fmb_ver = _inp("")
         self._tacho_fmb_ver.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         fg_ver_lay.addWidget(self._tacho_fmb_ver)
