@@ -1,5 +1,6 @@
 # Baza danych i dane użytkownika
 data/
+data_path.txt
 
 # Logi aplikacji
 *.log

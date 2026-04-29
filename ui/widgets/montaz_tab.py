@@ -253,7 +253,7 @@ class MontazTab(QWidget):
         self._typ_grp = QButtonGroup(self)
         self._typ_grp.setExclusive(False)
         self._typ_rbs: dict[str, QRadioButton] = {}
-        for name in ["Montaż", "Upgrade", "Przekładka", "Serwis", "Telefon"]:
+        for name in ["Montaż", "Upgrade", "Przekładka", "Serwis", "Demontaż", "Telefon"]:
             rb = _rb(name)
             rb.setAutoExclusive(False)
             rb.clicked.connect(lambda checked, b=rb: self._on_typ_rb_clicked(b))
@@ -339,9 +339,10 @@ class MontazTab(QWidget):
         g.addWidget(_lbl("CCID"), 3, 4) 
         g.addWidget(_lbl("Typ pojazdu"), 3, 5)
 
-        self._przek_rej_edit = _inp("", w=120) 
+        self._przek_rej_edit = _inp("", w=120)
+        self._add_copy_button(self._przek_rej_edit)
         self._przek_rej_edit.setVisible(False)
-        g.addWidget(self._przek_rej_edit, 4, 0, Qt.AlignLeft) 
+        g.addWidget(self._przek_rej_edit, 4, 0, Qt.AlignLeft)
         
         self._side_edit = _inp(""); g.addWidget(self._side_edit, 4, 2)
         self._device_model_combo = _inp(""); g.addWidget(self._device_model_combo, 4, 3)
@@ -1033,6 +1034,8 @@ class MontazTab(QWidget):
                 typ_text = clicked_btn.text()
                 if typ_text in ("Montaż", "Upgrade", "Przekładka"):
                     self._duty_time_edit.setText("0:30")
+                elif typ_text == "Demontaż":
+                    self._duty_time_edit.setText("0:15")
                 elif typ_text == "Serwis":
                     self._duty_time_edit.setText("0:20")
                 elif typ_text == "Telefon":
@@ -1399,7 +1402,7 @@ class MontazTab(QWidget):
         rec.comment        = self._comment_edit.toPlainText().strip()
         rec.duty_time_min  = self._duty_time_edit.text().strip()
         rec.recorder_location = self._recorder_loc_edit.text().strip()
-        typ_names = ["Montaż", "Upgrade", "Przekładka", "Serwis", "Telefon"]
+        typ_names = ["Montaż", "Upgrade", "Przekładka", "Serwis", "Demontaż", "Telefon"]
         rec.record_type = " "
         for name in typ_names:
             if self._typ_rbs[name].isChecked():

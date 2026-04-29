@@ -366,7 +366,7 @@ class MainWindow(QMainWindow):
         tb.setFixedHeight(42)
         self.addToolBar(tb)
 
-        self._act_new = QAction("＋  Nowy montaż", self)
+        self._act_new = QAction("＋  Nowy", self)
         self._act_new.setShortcut(QKeySequence.New)
         self._act_new.setToolTip("Dodaj nowy wpis  [Ctrl+N]")
         tb.addAction(self._act_new)
@@ -715,17 +715,22 @@ class MainWindow(QMainWindow):
                 else:
                     hdr.showSection(i)
 
-        date_from = settings.value("filter_date_from")
-        if date_from:
-            d = QDate.fromString(date_from, "yyyy-MM-dd")
-            if d.isValid():
-                self._filter_date_from.setDate(d)
-                
-        date_to = settings.value("filter_date_to")
-        if date_to:
-            d = QDate.fromString(date_to, "yyyy-MM-dd")
-            if d.isValid():
-                self._filter_date_to.setDate(d)
+        if self._db.get_setting("remember_search_filter", "1") == "1":
+            saved_search = self._db.get_setting("saved_search_filter", "")
+            if saved_search:
+                self._filter_search.setText(saved_search)
+
+        if self._db.get_setting("remember_date_filter", "1") == "1":
+            date_from = self._db.get_setting("saved_date_from", "")
+            if date_from:
+                d = QDate.fromString(date_from, "yyyy-MM-dd")
+                if d.isValid():
+                    self._filter_date_from.setDate(d)
+            date_to = self._db.get_setting("saved_date_to", "")
+            if date_to:
+                d = QDate.fromString(date_to, "yyyy-MM-dd")
+                if d.isValid():
+                    self._filter_date_to.setDate(d)
 
     def closeEvent(self, event):
         settings = QSettings("TwojaFirma", "SystemOdbiory")
@@ -733,8 +738,18 @@ class MainWindow(QMainWindow):
                           self._table.horizontalHeader().saveState())
         settings.setValue("visible_columns", list(self._visible_columns))
         settings.setValue("column_order", self._column_order)
-        settings.setValue("filter_date_from", self._filter_date_from.date().toString("yyyy-MM-dd"))
-        settings.setValue("filter_date_to", self._filter_date_to.date().toString("yyyy-MM-dd"))
+
+        if self._db.get_setting("remember_search_filter", "1") == "1":
+            self._db.set_setting("saved_search_filter", self._filter_search.text().strip())
+        else:
+            self._db.set_setting("saved_search_filter", "")
+
+        if self._db.get_setting("remember_date_filter", "1") == "1":
+            self._db.set_setting("saved_date_from", self._filter_date_from.date().toString("yyyy-MM-dd"))
+            self._db.set_setting("saved_date_to", self._filter_date_to.date().toString("yyyy-MM-dd"))
+        else:
+            self._db.set_setting("saved_date_from", "")
+            self._db.set_setting("saved_date_to", "")
         
         # --- Auto Backup ---
         try:
@@ -923,6 +938,8 @@ class MainWindow(QMainWindow):
 
         self._table.setSortingEnabled(True)
         self._loading = False
+        self._selected_record_id = None
+        self._update_buttons()
         n = len(self._records)
         self._lbl_count.setText(f"Rekordów: {n}")
         self._status_bar.showMessage(f"Załadowano {n} rekordów.", 3000)
@@ -1245,13 +1262,13 @@ class MainWindow(QMainWindow):
         is_duty = self._db.get_setting("show_duty_section", "1") == "1"
         self._btn_q_duty.setVisible(is_duty)
         self._btn_q_no_duty.setVisible(is_duty)
+        self._on_filter()
 
     @Slot(set, list)
     def _on_columns_changed(self, visible: set, order: list):
         self._visible_columns = visible
         self._column_order = order
         self._rebuild_table_columns()
-        self.load_records()
 
     @Slot()
     def _on_duplicate_row(self):
@@ -1299,7 +1316,7 @@ class MainWindow(QMainWindow):
 
         try:
             self._db.insert_record(new_rec)
-            self.load_records()
+            self._on_filter()
             self._status_bar.showMessage("Rekord zduplikowany.", 3000)
         except Exception as exc:
             logger.error(f"Błąd duplikowania: {exc}", exc_info=True)
@@ -1307,10 +1324,19 @@ class MainWindow(QMainWindow):
 
     def _open_form(self, form, success_msg: str):
         """Otwiera formularz jako niezależne okno (non-modal)."""
+        new_id = form._record.id if form._edit_mode else None
+        if new_id is not None:
+            for existing in self._open_forms:
+                if getattr(existing, '_edit_mode', False) and existing._record.id == new_id:
+                    existing.raise_()
+                    existing.activateWindow()
+                    form.deleteLater()
+                    return
+
         self._open_forms.append(form)
-        form.accepted.connect(lambda: (self.load_records(),
+        form.accepted.connect(lambda: (self._on_filter(),
                                        self._status_bar.showMessage(success_msg, 3000)))
-        form.record_duplicated.connect(lambda: (self.load_records(),
+        form.record_duplicated.connect(lambda: (self._on_filter(),
                                                 self._status_bar.showMessage("Rekord zduplikowany i dodany do tabeli.", 4000)))
         form.finished.connect(lambda: self._open_forms.remove(form)
                               if form in self._open_forms else None)
@@ -1361,7 +1387,7 @@ class MainWindow(QMainWindow):
         ) == QMessageBox.Yes:
             for rid in selected_ids:
                 self._db.delete_record(rid)
-            self.load_records()
+            self._on_filter()
             self._status_bar.showMessage(f"Usunięto {count} rekord(ów).", 3000)
 
     @Slot()

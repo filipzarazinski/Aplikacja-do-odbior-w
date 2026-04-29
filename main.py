@@ -170,6 +170,9 @@ def main() -> int:
 
         last_seen = db.get_setting("last_seen_version", "")
         if last_seen != APP_VERSION:
+            db.set_setting("saved_search_filter", "")
+            db.set_setting("saved_date_from", "")
+            db.set_setting("saved_date_to", "")
             from ui.whats_new_dialog import WhatsNewDialog
             WhatsNewDialog(APP_VERSION, last_seen, window).exec()
             db.set_setting("last_seen_version", APP_VERSION)

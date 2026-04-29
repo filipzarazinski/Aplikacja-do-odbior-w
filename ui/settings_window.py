@@ -1635,6 +1635,29 @@ class SettingsWindow(QDialog):
         info.setWordWrap(True)
         lay.addWidget(info)
 
+        # --- Filtry ---
+        grp_filters = QGroupBox("Filtry")
+        fl = QVBoxLayout(grp_filters)
+        fl.setSpacing(6)
+
+        self._cb_remember_search = QCheckBox(" Pamiętaj filtr wyszukiwarki między sesjami")
+        self._cb_remember_search.setStyleSheet(cb_style)
+        self._cb_remember_search.setChecked(self._db.get_setting("remember_search_filter", "1") == "1")
+        self._cb_remember_search.toggled.connect(
+            lambda v: self._db.set_setting("remember_search_filter", "1" if v else "0")
+        )
+        fl.addWidget(self._cb_remember_search)
+
+        self._cb_remember_dates = QCheckBox(" Pamiętaj filtry dat między sesjami")
+        self._cb_remember_dates.setStyleSheet(cb_style)
+        self._cb_remember_dates.setChecked(self._db.get_setting("remember_date_filter", "1") == "1")
+        self._cb_remember_dates.toggled.connect(
+            lambda v: self._db.set_setting("remember_date_filter", "1" if v else "0")
+        )
+        fl.addWidget(self._cb_remember_dates)
+
+        lay.addWidget(grp_filters)
+
         # --- Kopia zapasowa ---
         grp_backup = QGroupBox("Kopia zapasowa bazy danych")
         bl = QVBoxLayout(grp_backup)

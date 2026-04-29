@@ -2,6 +2,26 @@
 
 CHANGELOG = [
     {
+        "version": "1.1.3",
+        "date": "2026-04-29",
+        "entries": [
+            ("Lista główna", [
+                "Próba otwarcia formularza już otwartego rekordu przenosi istniejące okno na wierzch zamiast otwierac duplikat",
+                "Tabela odswiezana po zapisie, duplikowaniu i usuwaniu z zachowaniem aktywnych filtrow (wyszukiwarka + daty)",
+                "Przycisk Duplikuj jest nieaktywny po odswiezeniu tabeli gdy zaden wiersz nie jest zaznaczony",
+            ]),
+            ("Formularz", [
+                "Nowy typ: Demontaz - widoczny miedzy Serwisem a Telefonem",
+                "Pole 'Przekladka z' ma teraz przycisk kopiowania do schowka tak jak Nr rej., ID i SIM",
+            ]),
+            ("Ustawienia", [
+                "Nowe opcje w Ogolne: 'Pamietaj filtr wyszukiwarki' i 'Pamietaj filtry dat' - przy wlaczeniu filtry sa przywracane po ponownym uruchomieniu aplikacji",
+                "Po aktualizacji aplikacji zapisane filtry sa automatycznie resetowane",
+                "Zamkniecie ustawien odswiezа tabele z zachowaniem aktywnych filtrow",
+            ]),
+        ],
+    },
+    {
         "version": "1.1.2",
         "date": "2026-04-28",
         "entries": [
