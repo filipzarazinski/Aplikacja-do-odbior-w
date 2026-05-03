@@ -1,5 +1,5 @@
 #define AppName "Odbiory"
-#define AppVersion "1.1.3"
+#define AppVersion "1.1.5"
 #define AppPublisher "filipzarazinski"
 #define AppURL "https://github.com/filipzarazinski/Aplikacja-do-odbior-w"
 #define AppExeName "Odbiory.exe"

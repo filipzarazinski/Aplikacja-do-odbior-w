@@ -109,15 +109,14 @@ QTableView::indicator {
     height: 18px;
     border: 2px solid #cbd5e1;
     border-radius: 4px;
-    background-color: #ffffff;
+    background-color: transparent;
 }
 QTableView::indicator:hover {
     border-color: #94a3b8;
 }
 QTableView::indicator:checked {
-    background-color: #ffffff;
-    border-color: #cbd5e1;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f172a' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
+    background-color: #334155;
+    border-color: #1e293b;
 }
 QHeaderView::section {
     background-color: #f8fafc;
@@ -208,14 +207,12 @@ QCheckBox::indicator:hover, QRadioButton::indicator:hover, QListView::indicator:
     border-color: #94a3b8;
 }
 QCheckBox::indicator:checked, QListView::indicator:checked {
-    background-color: #ffffff;
-    border-color: #cbd5e1;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f172a' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
+    background-color: #94a3b8;
+    border-color: #64748b;
 }
 QRadioButton::indicator:checked {
-    background-color: #ffffff;
-    border-color: #cbd5e1;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f172a' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='4' fill='%230f172a'/></svg>");
+    background-color: #94a3b8;
+    border-color: #64748b;
 }
 
 /* --- Listy (QListWidget, QListView) --- */

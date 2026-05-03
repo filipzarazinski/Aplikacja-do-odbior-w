@@ -4,6 +4,7 @@ import logging
 from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont, QIcon
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from config import APP_NAME, APP_VERSION, STYLES_DIR, DB_PATH, BASE_DIR, BACKUP_DIR, VERSION_URL, INSTALLER_URL
 from database.db_manager import DatabaseManager
@@ -63,7 +64,24 @@ def _download_and_install(parent, version: str) -> None:
         return
     finally:
         progress.close()
-    subprocess.Popen([tmp_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
+    import sys as _sys
+    exe_path = _sys.executable if getattr(_sys, "frozen", False) else None
+
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0  # SW_HIDE
+
+    if exe_path:
+        cmd = f'start /wait "" "{tmp_path}" /VERYSILENT /CLOSEAPPLICATIONS && start "" "{exe_path}"'
+    else:
+        cmd = f'"{tmp_path}" /VERYSILENT /CLOSEAPPLICATIONS'
+
+    subprocess.Popen(
+        cmd,
+        shell=True,
+        startupinfo=si,
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
     QApplication.quit()
 
 
@@ -122,6 +140,18 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
+
+    _INSTANCE_KEY = "Odbiory_SingleInstance"
+    _sock = QLocalSocket()
+    _sock.connectToServer(_INSTANCE_KEY)
+    if _sock.waitForConnected(300):
+        _sock.disconnectFromServer()
+        QMessageBox.warning(None, "Aplikacja już działa",
+                            f"{APP_NAME} jest już uruchomiona.\nSprawdź pasek zadań.")
+        return 1
+    _instance_server = QLocalServer()
+    QLocalServer.removeServer(_INSTANCE_KEY)
+    _instance_server.listen(_INSTANCE_KEY)
     app.setFont(QFont("Segoe UI", 9))
 
     # Ustawienie ikony aplikacji

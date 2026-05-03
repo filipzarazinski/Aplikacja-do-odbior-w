@@ -2,6 +2,19 @@
 
 CHANGELOG = [
     {
+        "version": "1.1.5",
+        "date": "2026-05-03",
+        "entries": [
+            ("Formularz", [
+                "Ctrl+Shift+V oraz 'Wklej bez formatowania' w menu kontekstowym w polach komentarza – wkleja czysty tekst bez formatowania HTML",
+            ]),
+            ("Inne", [
+                "Próba uruchomienia drugiej instancji aplikacji wyświetla komunikat zamiast otwierać duplikat",
+                "Poprawa trybu jasnego",
+            ]),
+        ],
+    },
+    {
         "version": "1.1.4",
         "date": "2026-04-29",
         "entries": [

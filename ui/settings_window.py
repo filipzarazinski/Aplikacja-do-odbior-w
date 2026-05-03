@@ -1552,9 +1552,29 @@ class SettingsWindow(QDialog):
             self._on_od_mode_changed()
 
     def _pick_color(self, key: str, preview: QPushButton, lbl: QLabel):
-        color = QColorDialog.getColor(QColor(lbl.text()), self, "Wybierz kolor")
+        current_color = QColor(lbl.text())
+
+        dialog = QColorDialog(current_color, self)
+        dialog.setWindowTitle("Wybierz kolor")
+        dialog.setOption(QColorDialog.DontUseNativeDialog, True)
+
+        if self._is_light:
+            dialog.setStyleSheet(
+                "QFrame { border: 1px solid #94a3b8; }"
+                "QLabel { border: none; }"
+                "QLineEdit { border: 1px solid #94a3b8; background: #ffffff; }"
+            )
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        color = dialog.currentColor()
         if not color.isValid():
             return
+
+        for i in range(16):
+            self._db.set_setting(f"custom_color_{i}", dialog.customColor(i).name())
+
         hex_color = color.name()
         self._db.set_setting(key, hex_color)
         preview.setStyleSheet(f"background:{hex_color}; border:1px solid #64748b; border-radius:3px;")
@@ -1608,9 +1628,8 @@ class SettingsWindow(QDialog):
                 border-color: {'#94a3b8' if self._is_light else '#94a3b8'};
             }}
             QCheckBox::indicator:checked {{
-            background-color: {'#ffffff' if self._is_light else '#64748b'};
-            border-color: {'#cbd5e1' if self._is_light else '#94a3b8'};
-            image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='{'%230f172a' if self._is_light else 'white'}' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
+                background-color: {'#94a3b8' if self._is_light else '#64748b'};
+                border-color: {'#64748b' if self._is_light else '#94a3b8'};
             }}
         """
 
@@ -1922,8 +1941,24 @@ class SettingsWindow(QDialog):
         finally:
             progress.close()
 
-        # Uruchom instalator (Inno Setup) i zamknij aplikację
-        subprocess.Popen([tmp_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
+        import sys as _sys
+        exe_path = _sys.executable if getattr(_sys, "frozen", False) else None
+
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+
+        if exe_path:
+            cmd = f'start /wait "" "{tmp_path}" /VERYSILENT /CLOSEAPPLICATIONS && start "" "{exe_path}"'
+        else:
+            cmd = f'"{tmp_path}" /VERYSILENT /CLOSEAPPLICATIONS'
+
+        subprocess.Popen(
+            cmd,
+            shell=True,
+            startupinfo=si,
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
         QApplication.quit()
 
     # ---------------------------------------------------------------- helpers – General

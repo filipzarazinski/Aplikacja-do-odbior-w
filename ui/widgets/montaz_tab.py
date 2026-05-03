@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QApplication, QAbstractSpinBox, QCompleter
 )
 from PySide6.QtCore import Qt, QDate, QTime, Slot, QTimer, QEvent, QStringListModel
-from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon
+from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon, QAction
 
 from database.models import ServiceRecord, DinChannel
 from database.db_manager import DatabaseManager
@@ -184,10 +184,8 @@ if _is_light:
         QCheckBox {{ background: transparent; }}
         QCheckBox::indicator {{ width: 13px; height: 13px; border: 1px solid #cbd5e1; border-radius: 2px; background: #ffffff; }}
         QCheckBox::indicator:hover {{ border-color: #94a3b8; }}
-        QCheckBox::indicator:checked {{ 
-            background: #ffffff; border-color: #cbd5e1; 
-            image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f172a' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
-        }}
+        QCheckBox::indicator:checked {{ background: #94a3b8; border-color: #64748b; }}
+        QToolTip {{ background: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; }}
     """
 else:
     _SMALL_CB_STYLE = f"""
@@ -197,11 +195,36 @@ else:
         QCheckBox::indicator:checked {{ background: #64748b; border-color: #94a3b8; }}
     """
 
+class PlainPasteTextEdit(QTextEdit):
+    def keyPressEvent(self, event):
+        if (event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier)
+                and event.key() == Qt.Key_V):
+            self._paste_plain(); event.accept(); return
+        super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event):
+        menu = self.createStandardContextMenu()
+        action = QAction("Wklej bez formatowania\tCtrl+Shift+V", self)
+        action.setEnabled(bool(QApplication.clipboard().text()))
+        action.triggered.connect(self._paste_plain)
+        paste = next((a for a in menu.actions() if a.text() and "aste" in a.text()), None)
+        if paste:
+            menu.insertAction(paste, action)
+            menu.insertSeparator(paste)
+        else:
+            menu.addSeparator(); menu.addAction(action)
+        menu.exec(event.globalPos())
+
+    def _paste_plain(self):
+        text = QApplication.clipboard().text()
+        if text: self.insertPlainText(text)
+
+
 class MontazTab(QWidget):
 
     def __init__(self, record=None, edit_mode=False, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(f"background:{_BG_MAIN};")
+        self.setStyleSheet(f"background:{_BG_MAIN}; QToolTip {{ background:{_BG_INPUT}; color:{_TEXT}; border:1px solid {_BORDER}; padding: 3px; }}")
         self._db = DatabaseManager.instance()
         self._edit_mode = edit_mode
         self._initialized = False
@@ -368,13 +391,13 @@ class MontazTab(QWidget):
         g.addWidget(_lbl("Komentarz do protokołu"), 0, 0)
         g.addWidget(_lbl("Komentarz prywatny"), 0, 1)
 
-        self._comment_edit = QTextEdit()
+        self._comment_edit = PlainPasteTextEdit()
         self._comment_edit.setMinimumHeight(60) 
         self._comment_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._comment_edit.setStyleSheet(f"{_INPUT_STYLE} padding:4px;")
         g.addWidget(self._comment_edit, 1, 0)
         
-        self._private_comment_edit = QTextEdit()
+        self._private_comment_edit = PlainPasteTextEdit()
         self._private_comment_edit.setMinimumHeight(60) 
         self._private_comment_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._private_comment_edit.setStyleSheet(f"{_INPUT_STYLE} padding:4px;")
@@ -605,11 +628,14 @@ class MontazTab(QWidget):
         self._webasto_cb = _cb("Webasto")
         dg.addWidget(self._webasto_cb, 1, 0, Qt.AlignVCenter)
         self._webasto_din_combo = self._make_din_type_edit()
+        self._webasto_din_combo.setEnabled(False)
         dg.addWidget(self._webasto_din_combo, 1, 1, Qt.AlignVCenter)
         wb_state = QWidget(); wb_state.setStyleSheet("background:transparent;")
         wsl = QHBoxLayout(wb_state); wsl.setContentsMargins(0,0,0,0); wsl.setSpacing(4)
         self._webasto_level_grp = QButtonGroup(self)
         self._webasto_low_rb  = _rb("Niski"); self._webasto_high_rb = _rb("Wysoki")
+        self._webasto_low_rb.setEnabled(False)
+        self._webasto_high_rb.setEnabled(False)
         for rb in (self._webasto_low_rb, self._webasto_high_rb):
             self._webasto_level_grp.addButton(rb); wsl.addWidget(rb)
         dg.addWidget(wb_state, 1, 2, Qt.AlignVCenter)
@@ -621,12 +647,15 @@ class MontazTab(QWidget):
             dg.addWidget(func, row, 0, Qt.AlignVCenter)
 
             din_type = self._make_din_type_edit()
+            din_type.setEnabled(False)
             dg.addWidget(din_type, row, 1, Qt.AlignVCenter)
 
             state_w = QWidget(); state_w.setStyleSheet("background:transparent;")
             sl = QHBoxLayout(state_w); sl.setContentsMargins(0,0,0,0); sl.setSpacing(4)
             grp = QButtonGroup(self)
             low = _rb("Niski"); high = _rb("Wysoki")
+            low.setEnabled(False)
+            high.setEnabled(False)
             grp.addButton(low); grp.addButton(high)
             sl.addWidget(low); sl.addWidget(high)
             dg.addWidget(state_w, row, 2, Qt.AlignVCenter)
@@ -675,13 +704,21 @@ class MontazTab(QWidget):
         cz_w = QWidget(); cz_w.setStyleSheet("background:transparent;")
         cz_l = QVBoxLayout(cz_w); cz_l.setContentsMargins(0,0,0,0); cz_l.setSpacing(4)
         
-        self._duty_cb = _cb("Dyżur")
-        cz_l.addWidget(self._duty_cb)
+        duty_grid = QGridLayout(); duty_grid.setContentsMargins(0,0,0,0); duty_grid.setSpacing(4)
 
-        cz_l.addWidget(_lbl("Czas dyżuru"))
-        
+        self._duty_cb = _cb("Dyżur")
+        duty_grid.addWidget(self._duty_cb, 0, 1, Qt.AlignRight)
+
+        duty_grid.addWidget(_lbl("Czas dyżuru"), 1, 1, Qt.AlignRight)
+
+        self._duty_comment_edit = _inp("Komentarz do dyżuru", w=220)
+        self._duty_comment_edit.setVisible(False)
+        duty_grid.addWidget(self._duty_comment_edit, 2, 0)
+
         self._duty_time_edit = _inp("np. 00:30", w=70)
-        cz_l.addWidget(self._duty_time_edit)
+        duty_grid.addWidget(self._duty_time_edit, 2, 1)
+
+        cz_l.addLayout(duty_grid)
         
         # Ukrywanie sekcji na podstawie ustawienia w bazie
         if self._db.get_setting("show_duty_section", "1") == "0":
@@ -762,6 +799,8 @@ class MontazTab(QWidget):
         # Podpięcie automatycznego dyżuru pod zmianę daty i godziny
         self._time_edit.timeChanged.connect(self._update_duty_auto_check)
         self._date_edit.dateChanged.connect(self._update_duty_auto_check)
+        self._duty_cb.toggled.connect(self._update_duty_comment_visibility)
+        self._duty_time_edit.textChanged.connect(self._update_duty_comment_visibility)
 
         self._plate_format_cb.stateChanged.connect(lambda: self._format_plate(self._plate_edit.text()))
         self._id_format_cb.stateChanged.connect(lambda: self._format_id(self._device_id_edit.text()))
@@ -800,6 +839,28 @@ class MontazTab(QWidget):
         is_duty_time = time_val >= QTime(15, 0) or time_val <= QTime(6, 55)
         
         self._duty_cb.setChecked(is_weekend or is_duty_time)
+
+    @staticmethod
+    def _parse_duty_minutes(text: str) -> int:
+        text = text.strip()
+        if ":" in text:
+            parts = text.split(":")
+            try:
+                return int(parts[0]) * 60 + int(parts[1])
+            except (ValueError, IndexError):
+                return 0
+        try:
+            return int(text)
+        except ValueError:
+            return 0
+
+    @Slot()
+    def _update_duty_comment_visibility(self):
+        minutes = self._parse_duty_minutes(self._duty_time_edit.text())
+        visible = self._duty_cb.isChecked() and minutes > 30
+        self._duty_comment_edit.setVisible(visible)
+        if not visible:
+            self._duty_comment_edit.clear()
 
     @Slot(str)
     def _on_ccid_changed(self, text: str):
@@ -1111,6 +1172,11 @@ class MontazTab(QWidget):
 
     @Slot(str)
     def _on_din_function_changed(self, text: str, rd: dict):
+        has_text = bool(text.strip())
+        rd["din_type"].setEnabled(has_text)
+        rd["high_rb"].setEnabled(has_text)
+        rd["low_rb"].setEnabled(has_text)
+
         needs = any(kw in text.lower() for kw in DIN_NEEDS_SN_KEYWORDS)
         rd["sn_edit"].setVisible(needs)
         if not needs:
@@ -1255,6 +1321,8 @@ class MontazTab(QWidget):
             self._comment_edit.setPlainText(rec.comment)
             self._private_comment_edit.setPlainText(rec.config_json.get("komentarzPrywatny",""))
             self._duty_time_edit.setText(str(rec.duty_time_min) if rec.duty_time_min else "")
+            self._duty_comment_edit.setText(rec.config_json.get("komentarzDyzuru", ""))
+            self._update_duty_comment_visibility()
             self._recorder_loc_edit.setText(rec.recorder_location or "")
             self._odebrane_cb.setChecked(rec.config_json.get("odebrane", False))
             
@@ -1449,6 +1517,7 @@ class MontazTab(QWidget):
         rec.config_json["komentarzPrywatny"] = self._private_comment_edit.toPlainText().strip()
         rec.config_json["odebrane"] = self._odebrane_cb.isChecked()
         rec.config_json["dyzurZaznaczony"] = self._duty_cb.isChecked()
+        rec.config_json["komentarzDyzuru"] = self._duty_comment_edit.text().strip()
         
         rec.config_json["sondyRaw"] = {
             "an0Pojemnosc": self._probe1_cap.text().strip(),

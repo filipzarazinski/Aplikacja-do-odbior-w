@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
     QDateEdit, QFrame, QAbstractItemView, QApplication,
     QStyledItemDelegate, QStyleOptionViewItem, QStyle
 )
-from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint, QUrl
-from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QDesktopServices
+from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint, QUrl, QRect
+from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QDesktopServices, QPen, QPainter
 
 from config import APP_NAME, APP_VERSION, MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT
 from database.db_manager import DatabaseManager
@@ -85,6 +85,10 @@ class RowColorDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self._is_light = is_light
 
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.backgroundBrush = QBrush(Qt.NoBrush)
+
     def paint(self, painter, option, index):
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
@@ -104,30 +108,52 @@ class RowColorDelegate(QStyledItemDelegate):
         else:
             is_selected = opt.state & QStyle.State_Selected
             is_hover = opt.state & QStyle.State_MouseOver
-            
+
             if self._is_light:
-                if bg:
-                    color = QColor(bg)
-                    if is_hover: color = QColor("#bbf7d0")
-                    if is_selected: color = QColor("#4ade80")
+                if is_selected:
+                    color = QColor("#cbd5e1")
+                elif is_hover:
+                    color = QColor("#e2e8f0")
                 else:
-                    color = QColor("#ffffff")
-                    if is_hover: color = QColor("#f1f5f9")
-                    if is_selected: color = QColor("#e2e8f0")
+                    color = QColor(bg) if bg else QColor("#ffffff")
             else:
-                if bg:
-                    color = QColor(bg)
-                    if is_hover: color = QColor("#165c38")
-                    if is_selected: color = QColor("#3aad6a")
+                if is_selected:
+                    color = QColor("#333847")
+                elif is_hover:
+                    color = QColor("#22262f")
                 else:
-                    color = QColor("#1a1d23")
-                    if is_hover: color = QColor("#22262f")
-                    if is_selected: color = QColor("#333847")
-                    
+                    color = QColor(bg) if bg else QColor("#1a1d23")
+
+            opt.state &= ~QStyle.State_Selected
+            opt.state &= ~QStyle.State_MouseOver
             painter.fillRect(opt.rect, color)
             opt.backgroundBrush = QBrush(Qt.NoBrush)
 
-        super().paint(painter, opt, index)
+        if index.flags() & Qt.ItemIsUserCheckable:
+            self._paint_checkbox(painter, opt, index)
+        else:
+            super().paint(painter, opt, index)
+
+    def _paint_checkbox(self, painter, opt, index):
+        check_data = index.data(Qt.CheckStateRole)
+        is_checked = int(check_data) == 2 if check_data is not None else False
+        size = 16
+        cx = opt.rect.center().x() - size // 2
+        cy = opt.rect.center().y() - size // 2
+        rect = QRect(cx, cy, size, size)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        border_color = QColor("#475569") if self._is_light else QColor("#64748b")
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(border_color, 0.75))
+        painter.drawRoundedRect(rect, 3, 3)
+        if is_checked:
+            check_color = QColor("#1e293b") if self._is_light else QColor("#e2e8f0")
+            pen = QPen(check_color, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.drawLine(cx + 3, cy + 8, cx + 6, cy + 11)
+            painter.drawLine(cx + 6, cy + 11, cx + 12, cy + 4)
+        painter.restore()
 
 
 class CustomTableWidget(QTableWidget):
@@ -362,8 +388,13 @@ class MainWindow(QMainWindow):
                 QWidget { color: #0f172a; }
                 QStatusBar { background-color: #f1f5f9; color: #334155; border-top: 1px solid #cbd5e1; }
                 QToolBar { background-color: #ffffff; border-bottom: 1px solid #cbd5e1; }
+                QToolButton { background: transparent; border-radius: 4px; padding: 4px 8px; margin: 0 2px; }
+                QToolButton:hover { background-color: #e2e8f0; }
+                QToolButton:pressed { background-color: #cbd5e1; }
+                QToolButton:disabled { color: #94a3b8; }
                 QMenu { background-color: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; }
                 QMenu::item:selected { background-color: #e2e8f0; }
+                QToolTip { background-color: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; padding: 3px; }
             """)
         else:
             self.setStyleSheet("""
@@ -371,8 +402,13 @@ class MainWindow(QMainWindow):
                 QWidget { color: #e2e8f0; }
                 QStatusBar { background-color: #15181e; color: #94a3b8; border-top: 1px solid #2e3340; }
                 QToolBar { background-color: #1a1d23; border-bottom: 1px solid #2e3340; }
+                QToolButton { background: transparent; border-radius: 4px; padding: 4px 8px; margin: 0 2px; }
+                QToolButton:hover { background-color: #333847; }
+                QToolButton:pressed { background-color: #22262f; }
+                QToolButton:disabled { color: #475569; }
                 QMenu { background-color: #1a1d23; color: #e2e8f0; border: 1px solid #3a4150; }
                 QMenu::item:selected { background-color: #333847; }
+                QToolTip { background-color: #1a1d23; color: #e2e8f0; border: 1px solid #3a4150; padding: 3px; }
             """)
 
         central = QWidget()
@@ -676,27 +712,36 @@ class MainWindow(QMainWindow):
     def _rebuild_table_columns(self, table: QTableWidget = None):
         if table is None:
             table = self._table
-            
+
+        saved_widths = {}
+        if self._active_columns:
+            for i, (_, attr) in enumerate(self._active_columns):
+                if i < table.columnCount():
+                    saved_widths[attr] = table.columnWidth(i)
+
         self._active_columns = [
             (lbl, attr)
             for attr in self._column_order
             for lbl, a, _ in ALL_COLUMNS
             if a == attr and attr in self._visible_columns
         ]
-        
+
         table.setColumnCount(len(self._active_columns))
         table.setHorizontalHeaderLabels([c[0] for c in self._active_columns])
 
         if self._is_light:
             table.setStyleSheet("""
-                QTableWidget { 
-                    background-color: #ffffff; color: #0f172a; alternate-background-color: #f8fafc; 
-                    gridline-color: #94a3b8; border: 1px solid #cbd5e1; 
-                    selection-background-color: transparent; selection-color: #0f172a; 
+                QTableWidget {
+                    background-color: #ffffff; color: #0f172a; alternate-background-color: #f8fafc;
+                    gridline-color: #94a3b8; border: 1px solid #cbd5e1;
+                    selection-background-color: transparent; selection-color: #0f172a;
                     outline: none;
                 }
                 QHeaderView::section { background-color: #f8fafc; color: #334155; border: 1px solid #cbd5e1; border-top: none; border-left: none; padding: 4px; font-weight: bold; }
                 QTableCornerButton::section { background-color: #f8fafc; border: 1px solid #cbd5e1; border-top: none; border-left: none; }
+                QTableView::indicator { width: 18px; height: 18px; border: 2px solid #cbd5e1; border-radius: 4px; background-color: transparent; }
+                QTableView::indicator:hover { border-color: #94a3b8; }
+                QTableView::indicator:checked { background-color: #334155; border-color: #1e293b; }
             """)
         else:
             table.setStyleSheet("""
@@ -711,14 +756,15 @@ class MainWindow(QMainWindow):
 
         self._json_col_index = -1
         for i, (_, attr) in enumerate(self._active_columns):
+            width = saved_widths.get(attr, _COL_WIDTHS.get(attr, 100))
             if attr == "id":
-                table.setColumnWidth(i, _COL_WIDTHS.get(attr, 100))
+                table.setColumnWidth(i, width)
                 table.setColumnHidden(i, True)
             elif attr == "_json":
-                table.setColumnWidth(i, _COL_WIDTHS.get(attr, 100))
+                table.setColumnWidth(i, width)
                 self._json_col_index = i
             else:
-                table.setColumnWidth(i, _COL_WIDTHS.get(attr, 100))
+                table.setColumnWidth(i, width)
 
     # ---------------------------------------------------------------- Settings
 
@@ -1223,9 +1269,14 @@ class MainWindow(QMainWindow):
                 continue
             rec = self._db.get_record_by_id(rec_id)
             if rec:
-                duty_time = rec.duty_time_min if rec.duty_time_min else ""
                 typ_val = rec.record_type.strip() if rec.record_type else ""
-                line = f"{typ_val} - {rec.company_name} - {rec.license_plate}\t{duty_time}"
+                if typ_val == "Telefon":
+                    comment = " ".join((rec.comment or "").split())
+                    line = f"{rec.company_name} - {comment}" if comment else f"{rec.company_name} -"
+                else:
+                    duty_comment = rec.config_json.get("komentarzDyzuru", "").strip()
+                    base = f"{typ_val} - {rec.company_name} - {rec.license_plate}"
+                    line = f"{base} - {duty_comment}" if duty_comment else base
                 lines.append(line)
         if lines:
             QApplication.clipboard().setText("\n".join(lines))

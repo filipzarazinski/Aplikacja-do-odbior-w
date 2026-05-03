@@ -82,6 +82,12 @@ class ServiceForm(QDialog):
         footer.setFixedHeight(54)
         
         is_light = self._db.get_setting("theme_mode", "dark") == "light"
+        
+        tt_bg = "#ffffff" if is_light else "#2a2f3a"
+        tt_fg = "#0f172a" if is_light else "#e2e8f0"
+        tt_border = "#cbd5e1" if is_light else "#3a4150"
+        self.setStyleSheet(f"QToolTip {{ background-color: {tt_bg}; color: {tt_fg}; border: 1px solid {tt_border}; padding: 3px; }}")
+        
         bg_footer = "#f1f5f9" if is_light else "#15181e"
         border_footer = "#cbd5e1" if is_light else "#2e3340"
         btn_bg = "#ffffff" if is_light else "#2a2f3a"
@@ -91,8 +97,9 @@ class ServiceForm(QDialog):
         btn_hover_fg = "#2563eb" if is_light else "#e2e8f0"
         btn_pressed = "#e2e8f0" if is_light else "#3a4150"
 
+        footer.setObjectName("serviceFooter")
         footer.setStyleSheet(
-            f"background-color: {bg_footer}; border-top: 1px solid {border_footer};"
+            f"QWidget#serviceFooter {{ background-color: {bg_footer}; border-top: 1px solid {border_footer}; }}"
         )
         _BTN_H = 30
         _BTN_STYLE_NEUTRAL = (
