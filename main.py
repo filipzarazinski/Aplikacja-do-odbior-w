@@ -72,13 +72,16 @@ def _download_and_install(parent, version: str) -> None:
     si.wShowWindow = 0  # SW_HIDE
 
     if exe_path:
-        # Start-Process -Wait correctly waits for UAC-elevated installer to finish
-        ps_cmd = (
-            f"Start-Process '{tmp_path}' "
-            f"-ArgumentList '/VERYSILENT /CLOSEAPPLICATIONS' -Wait; "
-            f"Start-Process '{exe_path}'"
-        )
-        cmd = f'powershell -WindowStyle Hidden -Command "{ps_cmd}"'
+        ps1_path = os.path.join(tempfile.gettempdir(), "odbiory_update.ps1")
+        log_path = os.path.join(tempfile.gettempdir(), "odbiory_update.log")
+        with open(ps1_path, "w", encoding="utf-8") as f:
+            f.write(f'Add-Content "{log_path}" "$(Get-Date) - PS1 start, installer: {tmp_path}"\n')
+            f.write(f'Start-Process "{tmp_path}" -ArgumentList "/VERYSILENT /CLOSEAPPLICATIONS" -Wait\n')
+            f.write(f'Add-Content "{log_path}" "$(Get-Date) - Installer done, launching: {exe_path}"\n')
+            f.write(f'Start-Process "{exe_path}"\n')
+            f.write(f'Add-Content "{log_path}" "$(Get-Date) - App started"\n')
+            f.write(f'Remove-Item "{ps1_path}" -ErrorAction SilentlyContinue\n')
+        cmd = f'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "{ps1_path}"'
     else:
         cmd = f'"{tmp_path}" /VERYSILENT /CLOSEAPPLICATIONS'
 
