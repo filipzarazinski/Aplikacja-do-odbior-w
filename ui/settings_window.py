@@ -13,15 +13,65 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QAbstractItemView,
     QGroupBox, QCheckBox, QColorDialog, QRadioButton, QButtonGroup,
     QMessageBox, QDialogButtonBox, QProgressDialog, QApplication,
+    QStyledItemDelegate, QStyle, QStyleOptionViewItem,
 )
-from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QRect
+from PySide6.QtGui import QColor, QPainter, QPen
 
 from database.db_manager import DatabaseManager
 from ui.widgets.montaz_tab import _ID_TO_MODEL
 
 logger = logging.getLogger(__name__)
 
+
+
+# ── Delegate dla checkboxów w liście kolumn ────────────────────────────────────
+
+class _ColCheckDelegate(QStyledItemDelegate):
+    def __init__(self, is_light: bool, parent=None):
+        super().__init__(parent)
+        self._is_light = is_light
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        if not (index.flags() & Qt.ItemIsUserCheckable):
+            return
+        check_data = index.data(Qt.CheckStateRole)
+        is_checked = int(check_data) == 2 if check_data is not None else False
+
+        widget = option.widget
+        style = widget.style() if widget else QApplication.style()
+
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        ind_rect = style.subElementRect(
+            QStyle.SubElement.SE_ItemViewItemCheckIndicator, opt, widget
+        )
+        if not ind_rect.isValid() or ind_rect.isEmpty():
+            ind_rect = QRect(option.rect.left() + 2, option.rect.center().y() - 8, 16, 16)
+
+        cover = QRect(option.rect.left(), option.rect.top(),
+                      ind_rect.right() + 2, option.rect.height())
+        bg_opt = QStyleOptionViewItem(option)
+        bg_opt.rect = cover
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, bg_opt, painter, widget)
+
+        size = 16
+        cx = ind_rect.left()
+        cy = ind_rect.center().y() - size // 2
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        border_color = QColor("#475569") if self._is_light else QColor("#64748b")
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(border_color, 0.75))
+        painter.drawRoundedRect(QRect(cx, cy, size, size), 3, 3)
+        if is_checked:
+            check_color = QColor("#1e293b") if self._is_light else QColor("#e2e8f0")
+            pen = QPen(check_color, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.drawLine(cx + 3, cy + 8, cx + 6, cy + 11)
+            painter.drawLine(cx + 6, cy + 11, cx + 12, cy + 4)
+        painter.restore()
 
 
 # ── Worker thread do synchronizacji ───────────────────────────────────────────
@@ -537,7 +587,12 @@ class SettingsWindow(QDialog):
 
         self._db = DatabaseManager.instance()
         self._is_light = self._db.get_setting("theme_mode", "dark") == "light"
-        
+
+        for i in range(16):
+            saved = self._db.get_setting(f"custom_color_{i}", "")
+            if saved:
+                QColorDialog.setCustomColor(i, QColor(saved))
+
         self._all_columns = all_columns
         self._column_order = list(column_order)
         self._visible_set = set(visible_set)
@@ -548,7 +603,7 @@ class SettingsWindow(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        tabs = QTabWidget()
+        tabs = QTabWidget(self)
         tabs.setDocumentMode(True)
         tabs.addTab(self._build_general_tab(),         "  Ogólne  ")
         tabs.addTab(self._build_columns_tab(),         "  Kolumny  ")
@@ -574,14 +629,17 @@ class SettingsWindow(QDialog):
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        inner = QTabWidget()
+        inner = QTabWidget(w)
         inner.setDocumentMode(True)
         inner.addTab(self._build_sim_tab(),              "  Baza SIM  ")
         inner.addTab(self._build_zbiorcze_tab(),         "  Słowniki / Importy  ")
         inner.addTab(self._build_bulk_import_widget(),   "  Zbiorczy import słowników  ")
-        inner.currentChanged.connect(
-            lambda idx: self._sim_dict_tab.ensure_loaded() if idx == 0 else None
-        )
+        def _on_inner_changed(idx):
+            if idx == 0:
+                self._sim_dict_tab.ensure_loaded()
+            elif idx == 1 and self._dict_tab_refs:
+                self._dict_tab_refs[0].ensure_loaded()
+        inner.currentChanged.connect(_on_inner_changed)
         lay.addWidget(inner, 1)
         return w
 
@@ -597,11 +655,11 @@ class SettingsWindow(QDialog):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        splitter = QSplitter(_Qt.Vertical)
+        splitter = QSplitter(_Qt.Vertical, w)
         splitter.setChildrenCollapsible(False)
 
         # ── Panel górny: synchronizacja + status ────────────────────────────
-        top = QWidget()
+        top = QWidget(splitter)
         lay = QVBoxLayout(top)
         lay.setContentsMargins(8, 8, 8, 4)
         lay.setSpacing(5)
@@ -717,6 +775,7 @@ class SettingsWindow(QDialog):
             excel_parser=excel_parser,
             add_labels=["Nazwa firmy", "Flota"],
             commit_fn=self._db.commit,
+            lazy=True,
         )
         return tab
 
@@ -746,6 +805,7 @@ class SettingsWindow(QDialog):
             excel_parser=excel_parser,
             add_labels=["Marka i model", "Typ pojazdu"],
             commit_fn=self._db.commit,
+            lazy=True,
         )
 
     # ---------------------------------------------------------------- Monterzy tab
@@ -777,6 +837,7 @@ class SettingsWindow(QDialog):
             excel_parser=excel_parser,
             add_labels=["Imie i nazwisko"],
             commit_fn=self._db.commit,
+            lazy=True,
         )
 
     # ---------------------------------------------------------------- Lokalizacje tab
@@ -804,6 +865,7 @@ class SettingsWindow(QDialog):
             excel_parser=excel_parser,
             add_labels=["Lokalizacja"],
             commit_fn=self._db.commit,
+            lazy=True,
         )
 
     # ---------------------------------------------------------------- Model urządzenia tab
@@ -831,6 +893,7 @@ class SettingsWindow(QDialog):
             excel_parser=excel_parser,
             add_labels=["Model urządzenia"],
             commit_fn=self._db.commit,
+            lazy=True,
         )
 
     # ---------------------------------------------------------------- Urządzenia dodatkowe tab
@@ -870,6 +933,7 @@ class SettingsWindow(QDialog):
             excel_parser=excel_parser,
             add_labels=["Urządzenie dodatkowe", "Flota"],
             commit_fn=self._db.commit,
+            lazy=True,
         )
 
     # ---------------------------------------------------------------- Linki tab
@@ -898,6 +962,7 @@ class SettingsWindow(QDialog):
             excel_parser=excel_parser,
             add_labels=["Flota", "Link"],
             commit_fn=self._db.commit,
+            lazy=True,
         )
 
     # ---------------------------------------------------------------- Zbiorczy import tab
@@ -1015,7 +1080,7 @@ class SettingsWindow(QDialog):
 
         # === Zakładki słowników na górze, wypełniają całe okno ===
         self._dict_tab_refs: list = []
-        sub = QTabWidget()
+        sub = QTabWidget(w)
         sub.setDocumentMode(True)
 
         for label, build_fn in [
@@ -1030,6 +1095,11 @@ class SettingsWindow(QDialog):
             tab = build_fn()
             self._dict_tab_refs.append(tab)
             sub.addTab(tab, f"  {label}  ")
+
+        sub.currentChanged.connect(
+            lambda idx: self._dict_tab_refs[idx].ensure_loaded()
+            if idx < len(self._dict_tab_refs) else None
+        )
 
         outer.addWidget(sub, 1)
         return w
@@ -1070,7 +1140,7 @@ class SettingsWindow(QDialog):
         btn_row.addWidget(btn_refresh)
         lay.addLayout(btn_row)
 
-        self._bulk_table = QTableWidget(0, 3)
+        self._bulk_table = QTableWidget(0, 3, w)
         self._bulk_table.setHorizontalHeaderLabels(["Słownik", "Arkusz w pliku", "Wynik"])
         self._bulk_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._bulk_table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -1208,7 +1278,7 @@ class SettingsWindow(QDialog):
         opt_row.addWidget(self._btn_import_odbiory, 1)
         lay.addLayout(opt_row)
 
-        self._import_progress_bar = QProgressBar()
+        self._import_progress_bar = QProgressBar(w)
         self._import_progress_bar.setVisible(False)
         self._import_progress_bar.setFixedHeight(14)
         lay.addWidget(self._import_progress_bar)
@@ -1310,7 +1380,10 @@ class SettingsWindow(QDialog):
         self._col_list.setStyleSheet(
             "QListWidget { font-size: 9pt; }"
             "QListWidget::item { padding: 4px 6px; }"
+            "QListWidget::indicator { width: 16px; height: 16px; background: transparent; border: none; }"
+            "QListWidget::indicator:checked { background: transparent; border: none; }"
         )
+        self._col_list.setItemDelegate(_ColCheckDelegate(self._is_light, self._col_list))
 
         label_map = {attr: lbl for lbl, attr, _ in self._all_columns}
         for attr in self._column_order:
@@ -1635,13 +1708,21 @@ class SettingsWindow(QDialog):
 
         self._cb_duty = QCheckBox(" Dyżurny")
         self._cb_duty.setStyleSheet(cb_style)
-        
+
         # Pobranie ustawienia z bazy (domyślnie włączone - "1")
         is_duty_enabled = self._db.get_setting("show_duty_section", "1") == "1"
         self._cb_duty.setChecked(is_duty_enabled)
         self._cb_duty.toggled.connect(self._on_duty_toggled)
 
         lay.addWidget(self._cb_duty)
+
+        self._cb_fleet_params = QCheckBox(" Filtrowanie firmy na stronie")
+        self._cb_fleet_params.setStyleSheet(cb_style)
+        self._cb_fleet_params.setChecked(self._db.get_setting("fleet_url_params", "1") == "1")
+        self._cb_fleet_params.toggled.connect(
+            lambda v: self._db.set_setting("fleet_url_params", "1" if v else "0")
+        )
+        lay.addWidget(self._cb_fleet_params)
 
         self._cb_theme = QCheckBox(" Jasny motyw aplikacji (Bright Mode)")
         self._cb_theme.setStyleSheet(cb_style)

@@ -411,7 +411,7 @@ class MainWindow(QMainWindow):
                 QToolTip { background-color: #1a1d23; color: #e2e8f0; border: 1px solid #3a4150; padding: 3px; }
             """)
 
-        central = QWidget()
+        central = QWidget(self)
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
@@ -419,7 +419,7 @@ class MainWindow(QMainWindow):
 
         self._build_toolbar()
 
-        inner = QWidget()
+        inner = QWidget(central)
         inner_lay = QVBoxLayout(inner)
         inner_lay.setContentsMargins(12, 10, 12, 10)
         inner_lay.setSpacing(8)
@@ -473,7 +473,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self._act_settings)
 
     def _build_filter_bar(self) -> QWidget:
-        bar = QWidget()
+        bar = QWidget(self)
         bar.setObjectName("filter_bar")
         bar.setFixedHeight(84)
         
@@ -570,7 +570,7 @@ class MainWindow(QMainWindow):
         self._btn_search_label.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self._btn_search_label)
 
-        sep = QFrame()
+        sep = QFrame(bar)
         sep.setFrameShape(QFrame.VLine)
         sep.setStyleSheet(f"background: {border}; border: none; max-width: 1px; min-height: 26px;")
         lay.addWidget(sep)
@@ -687,7 +687,7 @@ class MainWindow(QMainWindow):
         return bar
 
     def _build_table(self) -> QTableWidget:
-        table = CustomTableWidget()
+        table = CustomTableWidget(self)
         table.setItemDelegate(RowColorDelegate(table, is_light=self._is_light))
         
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1251,7 +1251,18 @@ class MainWindow(QMainWindow):
             act_fleet = menu.addAction(label)
             act_fleet.setEnabled(bool(url))
             if url:
-                act_fleet.triggered.connect(lambda *_, u=url: QDesktopServices.openUrl(QUrl(u)))
+                def _open_fleet(*, u=url, r=rec):
+                    from PySide6.QtCore import QUrlQuery
+                    q_url = QUrl(u)
+                    if self._db.get_setting("fleet_url_params", "1") == "1":
+                        query = QUrlQuery(q_url.query())
+                        query.addQueryItem("tm_action", "1")
+                        company = (r.company_name or "").strip()
+                        if company:
+                            query.addQueryItem("firma", company)
+                        q_url.setQuery(query)
+                    QDesktopServices.openUrl(q_url)
+                act_fleet.triggered.connect(_open_fleet)
             menu.addSeparator()
 
         if self._db.get_setting("show_duty_section", "1") == "1":
@@ -1277,7 +1288,22 @@ class MainWindow(QMainWindow):
                     duty_comment = rec.config_json.get("komentarzDyzuru", "").strip()
                     base = f"{typ_val} - {rec.company_name} - {rec.license_plate}"
                     line = f"{base} - {duty_comment}" if duty_comment else base
-                lines.append(line)
+                val = rec.duty_time_min
+                if val is None:
+                    duty_time = ""
+                elif isinstance(val, int):
+                    duty_time = f"{val // 60}:{val % 60:02d}" if val else ""
+                else:
+                    raw = str(val).strip()
+                    if ":" in raw:
+                        try:
+                            h, m = raw.split(":", 1)
+                            duty_time = f"{int(h)}:{int(m):02d}"
+                        except ValueError:
+                            duty_time = raw
+                    else:
+                        duty_time = raw
+                lines.append(f"{line}\t{duty_time}")
         if lines:
             QApplication.clipboard().setText("\n".join(lines))
             self._status_bar.showMessage(

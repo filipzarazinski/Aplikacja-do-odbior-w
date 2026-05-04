@@ -71,14 +71,14 @@ class ServiceForm(QDialog):
         root.setSpacing(0)
 
         # Zakładki
-        self._tabs = QTabWidget()
+        self._tabs = QTabWidget(self)
         root.addWidget(self._tabs, 1)
 
         self._tab_montaz = MontazTab(record=self._record, edit_mode=self._edit_mode)
         self._tabs.addTab(self._tab_montaz, f"  Montaże   |   {title}  ")
 
         # Stopka
-        footer = QWidget()
+        footer = QWidget(self)
         footer.setFixedHeight(54)
         
         is_light = self._db.get_setting("theme_mode", "dark") == "light"
@@ -196,7 +196,16 @@ class ServiceForm(QDialog):
             return
         url = self._db.get_url_for_fleet(fleet)
         if url:
-            QDesktopServices.openUrl(QUrl(url))
+            from PySide6.QtCore import QUrlQuery
+            q_url = QUrl(url)
+            if self._db.get_setting("fleet_url_params", "1") == "1":
+                query = QUrlQuery(q_url.query())
+                query.addQueryItem("tm_action", "1")
+                company = (self._record.company_name or "").strip()
+                if company:
+                    query.addQueryItem("firma", company)
+                q_url.setQuery(query)
+            QDesktopServices.openUrl(q_url)
         else:
             QMessageBox.information(
                 self, "Brak linku",
@@ -240,8 +249,6 @@ class ServiceForm(QDialog):
         rec = self._json_to_record(data)
         self._tab_montaz.load_from_record(rec)
         self._record = rec
-        self._original_record = __import__("copy").deepcopy(rec)
-        self._tab_montaz.collect_to_record(self._original_record)
 
     @staticmethod
     def _json_to_record(j: dict) -> "ServiceRecord":

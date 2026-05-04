@@ -129,7 +129,7 @@ class DictTab(QWidget):
         layout.addLayout(search_row)
 
         # Table
-        self._table = QTableWidget()
+        self._table = QTableWidget(self)
         self._table.setColumnCount(len(headers))
         self._table.setHorizontalHeaderLabels(headers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)

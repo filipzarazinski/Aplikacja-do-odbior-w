@@ -72,7 +72,13 @@ def _download_and_install(parent, version: str) -> None:
     si.wShowWindow = 0  # SW_HIDE
 
     if exe_path:
-        cmd = f'start /wait "" "{tmp_path}" /VERYSILENT /CLOSEAPPLICATIONS && start "" "{exe_path}"'
+        # Start-Process -Wait correctly waits for UAC-elevated installer to finish
+        ps_cmd = (
+            f"Start-Process '{tmp_path}' "
+            f"-ArgumentList '/VERYSILENT /CLOSEAPPLICATIONS' -Wait; "
+            f"Start-Process '{exe_path}'"
+        )
+        cmd = f'powershell -WindowStyle Hidden -Command "{ps_cmd}"'
     else:
         cmd = f'"{tmp_path}" /VERYSILENT /CLOSEAPPLICATIONS'
 

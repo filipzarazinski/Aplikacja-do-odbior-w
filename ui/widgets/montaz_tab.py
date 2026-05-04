@@ -488,9 +488,9 @@ class MontazTab(QWidget):
         d8_l.addStretch()
         lay.addWidget(d8_w, stretch=2) 
 
-        tabs = QTabWidget()
-        tabs.setFixedWidth(380) 
-        tabs.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed) 
+        tabs = QTabWidget(w)
+        tabs.setFixedWidth(380)
+        tabs.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         tabs.setFixedHeight(185) 
         tabs.setStyleSheet(f"""
             QTabWidget::pane {{ background:{_BG_INPUT}; border:1px solid {_BORDER}; border-radius:3px; }}
@@ -534,7 +534,7 @@ class MontazTab(QWidget):
         can_center_lay.setContentsMargins(0,0,0,0)
         can_center_lay.addStretch(1) 
         
-        can_inner = QWidget()
+        can_inner = QWidget(can_w)
         cl = QGridLayout(can_inner)
         cl.setContentsMargins(0,10,0,10)
         cl.setSpacing(10)
@@ -706,17 +706,21 @@ class MontazTab(QWidget):
         
         duty_grid = QGridLayout(); duty_grid.setContentsMargins(0,0,0,0); duty_grid.setSpacing(4)
 
-        self._duty_cb = _cb("Dyżur")
-        duty_grid.addWidget(self._duty_cb, 0, 1, Qt.AlignRight)
+        self._dodanie_cb = _cb("Dodanie do systemu")
+        self._dodanie_cb.toggled.connect(self._on_dodanie_toggled)
+        duty_grid.addWidget(self._dodanie_cb, 0, 0, 1, 2, Qt.AlignRight)
 
-        duty_grid.addWidget(_lbl("Czas dyżuru"), 1, 1, Qt.AlignRight)
+        self._duty_cb = _cb("Dyżur")
+        duty_grid.addWidget(self._duty_cb, 1, 1, Qt.AlignRight)
+
+        duty_grid.addWidget(_lbl("Czas dyżuru"), 2, 1, Qt.AlignRight)
 
         self._duty_comment_edit = _inp("Komentarz do dyżuru", w=220)
         self._duty_comment_edit.setVisible(False)
-        duty_grid.addWidget(self._duty_comment_edit, 2, 0)
+        duty_grid.addWidget(self._duty_comment_edit, 3, 0)
 
         self._duty_time_edit = _inp("np. 00:30", w=70)
-        duty_grid.addWidget(self._duty_time_edit, 2, 1)
+        duty_grid.addWidget(self._duty_time_edit, 3, 1)
 
         cz_l.addLayout(duty_grid)
         
@@ -853,6 +857,24 @@ class MontazTab(QWidget):
             return int(text)
         except ValueError:
             return 0
+
+    @Slot(bool)
+    def _on_dodanie_toggled(self, checked: bool):
+        if checked:
+            current = self._parse_duty_minutes(self._duty_time_edit.text())
+            total = current + 15
+            self._duty_time_edit.setText(f"{total // 60}:{total % 60:02d}")
+            self._duty_cb.setChecked(True)
+            self._duty_comment_edit.setVisible(True)
+            if not self._duty_comment_edit.text().strip():
+                self._duty_comment_edit.setText("dodanie do systemu")
+        else:
+            current = self._parse_duty_minutes(self._duty_time_edit.text())
+            total = max(0, current - 15)
+            self._duty_time_edit.setText(f"{total // 60}:{total % 60:02d}" if total else "")
+            if self._duty_comment_edit.text().strip() == "dodanie do systemu":
+                self._duty_comment_edit.setText("")
+            self._update_duty_comment_visibility()
 
     @Slot()
     def _update_duty_comment_visibility(self):
@@ -1322,6 +1344,7 @@ class MontazTab(QWidget):
             self._private_comment_edit.setPlainText(rec.config_json.get("komentarzPrywatny",""))
             self._duty_time_edit.setText(str(rec.duty_time_min) if rec.duty_time_min else "")
             self._duty_comment_edit.setText(rec.config_json.get("komentarzDyzuru", ""))
+            self._dodanie_cb.setChecked(False)
             self._update_duty_comment_visibility()
             self._recorder_loc_edit.setText(rec.recorder_location or "")
             self._odebrane_cb.setChecked(rec.config_json.get("odebrane", False))
