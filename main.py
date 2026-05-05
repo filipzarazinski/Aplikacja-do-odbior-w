@@ -73,13 +73,9 @@ def _download_and_install(parent, version: str) -> None:
 
     if exe_path:
         ps1_path = os.path.join(tempfile.gettempdir(), "odbiory_update.ps1")
-        log_path = os.path.join(tempfile.gettempdir(), "odbiory_update.log")
         with open(ps1_path, "w", encoding="utf-8") as f:
-            f.write(f'Add-Content "{log_path}" "$(Get-Date) - PS1 start, installer: {tmp_path}"\n')
             f.write(f'Start-Process "{tmp_path}" -ArgumentList "/VERYSILENT /CLOSEAPPLICATIONS" -Wait\n')
-            f.write(f'Add-Content "{log_path}" "$(Get-Date) - Installer done, launching: {exe_path}"\n')
             f.write(f'Start-Process "{exe_path}"\n')
-            f.write(f'Add-Content "{log_path}" "$(Get-Date) - App started"\n')
             f.write(f'Remove-Item "{ps1_path}" -ErrorAction SilentlyContinue\n')
         cmd = f'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "{ps1_path}"'
     else:
@@ -92,6 +88,29 @@ def _download_and_install(parent, version: str) -> None:
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
     )
     QApplication.quit()
+
+
+def _apply_dwm_titlebar(widget, is_light: bool) -> None:
+    """Dopasowuje pasek tytułu okna do motywu aplikacji."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        DWMWA_BORDER_COLOR = 34
+        DWMWA_COLOR_NONE = ctypes.c_uint(0xFFFFFFFE)
+        hwnd = int(widget.winId())
+        mode = ctypes.c_int(0 if is_light else 1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ctypes.byref(mode), ctypes.sizeof(mode)
+        )
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_BORDER_COLOR,
+            ctypes.byref(DWMWA_COLOR_NONE), ctypes.sizeof(DWMWA_COLOR_NONE)
+        )
+    except Exception:
+        pass
 
 
 def setup_logging() -> None:
@@ -191,6 +210,7 @@ def main() -> int:
     try:
         window = MainWindow()
         window.show()
+        _apply_dwm_titlebar(window, is_light)
 
         def _on_update(latest: str):
             reply = QMessageBox.question(
@@ -233,6 +253,11 @@ def main() -> int:
             backup_name = f"odbiory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
             shutil.copy2(DB_PATH, os.path.join(auto_backup_path, backup_name))
             logger.info(f"Auto-backup: {os.path.join(auto_backup_path, backup_name)}")
+            existing = sorted(
+                [f for f in os.listdir(auto_backup_path) if f.startswith("odbiory_") and f.endswith(".db")]
+            )
+            for old in existing[:-10]:
+                os.remove(os.path.join(auto_backup_path, old))
         except Exception as exc:
             logger.warning(f"Auto-backup nie powiódł się: {exc}")
 

@@ -41,7 +41,7 @@ def _make_collapsible_section(parent_lay: QVBoxLayout, entry: dict, expanded: bo
     )
     parent_lay.addWidget(btn)
 
-    body = QWidget()
+    body = QWidget(parent_lay.parentWidget())
     body_lay = QVBoxLayout(body)
     body_lay.setContentsMargins(16, 0, 0, 8)
     body_lay.setSpacing(2)
@@ -88,11 +88,11 @@ class WhatsNewDialog(QDialog):
         root.setSpacing(0)
         root.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
+        scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
 
-        content = QWidget()
+        content = QWidget(scroll)
         lay = QVBoxLayout(content)
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(0)
@@ -100,7 +100,7 @@ class WhatsNewDialog(QDialog):
         if new_entries:
             for i, entry in enumerate(new_entries):
                 if i > 0:
-                    sep = QWidget()
+                    sep = QWidget(content)
                     sep.setFixedHeight(1)
                     sep.setStyleSheet("background: #2e3340; margin: 4px 0;")
                     lay.addWidget(sep)

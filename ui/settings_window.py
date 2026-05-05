@@ -587,6 +587,7 @@ class SettingsWindow(QDialog):
 
         self._db = DatabaseManager.instance()
         self._is_light = self._db.get_setting("theme_mode", "dark") == "light"
+        self._apply_dwm_titlebar()
 
         for i in range(16):
             saved = self._db.get_setting(f"custom_color_{i}", "")
@@ -605,11 +606,11 @@ class SettingsWindow(QDialog):
 
         tabs = QTabWidget(self)
         tabs.setDocumentMode(True)
+        tabs.tabBar().setExpanding(True)
         tabs.addTab(self._build_general_tab(),         "  Ogólne  ")
         tabs.addTab(self._build_columns_tab(),         "  Kolumny  ")
         tabs.addTab(self._build_dicts_tab(),           "  Słowniki  ")
         tabs.addTab(self._build_colors_tab(),          "  Kolory  ")
-        tabs.addTab(self._build_odbiory_import_tab(),  "  Import z Excel  ")
         tabs.addTab(self._build_about_tab(),           "  O aplikacji  ")
         root.addWidget(tabs, 1)
 
@@ -622,6 +623,21 @@ class SettingsWindow(QDialog):
         btn_row.addWidget(btn_close)
         root.addLayout(btn_row)
 
+    def _apply_dwm_titlebar(self) -> None:
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            mode = ctypes.c_int(0 if self._is_light else 1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 20, ctypes.byref(mode), ctypes.sizeof(mode)
+            )
+            DWMWA_COLOR_NONE = ctypes.c_uint(0xFFFFFFFE)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 34, ctypes.byref(DWMWA_COLOR_NONE), ctypes.sizeof(DWMWA_COLOR_NONE)
+            )
+        except Exception:
+            pass
+
     # ---------------------------------------------------------------- Dicts tab (kontener)
 
     def _build_dicts_tab(self) -> QWidget:
@@ -631,9 +647,11 @@ class SettingsWindow(QDialog):
         lay.setSpacing(0)
         inner = QTabWidget(w)
         inner.setDocumentMode(True)
+        inner.tabBar().setExpanding(True)
         inner.addTab(self._build_sim_tab(),              "  Baza SIM  ")
         inner.addTab(self._build_zbiorcze_tab(),         "  Słowniki / Importy  ")
         inner.addTab(self._build_bulk_import_widget(),   "  Zbiorczy import słowników  ")
+        inner.addTab(self._build_odbiory_import_tab(),   "  Excel  ")
         def _on_inner_changed(idx):
             if idx == 0:
                 self._sim_dict_tab.ensure_loaded()
@@ -646,8 +664,6 @@ class SettingsWindow(QDialog):
     # ---------------------------------------------------------------- SIM tab
 
     def _build_sim_tab(self) -> QWidget:
-        from PySide6.QtWidgets import QSplitter
-        from PySide6.QtCore import Qt as _Qt
         from ui.dict_tab import DictTab
 
         w = QWidget()
@@ -655,11 +671,10 @@ class SettingsWindow(QDialog):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        splitter = QSplitter(_Qt.Vertical, w)
-        splitter.setChildrenCollapsible(False)
-
         # ── Panel górny: synchronizacja + status ────────────────────────────
-        top = QWidget(splitter)
+        from PySide6.QtWidgets import QSizePolicy
+        top = QWidget(w)
+        top.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         lay = QVBoxLayout(top)
         lay.setContentsMargins(8, 8, 8, 4)
         lay.setSpacing(5)
@@ -708,11 +723,7 @@ class SettingsWindow(QDialog):
         status_row.addWidget(btn_clear_sim)
         lay.addLayout(status_row)
 
-        note = QLabel("ℹ  Kol. A = SIM,  kol. B = CCID  (wiersz 1 = nagłówek – pomijany).  pip install openpyxl")
-        note.setStyleSheet("color: #64748b; font-size: 8pt;")
-        lay.addWidget(note)
-
-        splitter.addWidget(top)
+        outer.addWidget(top)
 
         # ── Panel dolny: tabela kart SIM ────────────────────────────────────
         def _sim_excel_parser(ws):
@@ -739,10 +750,7 @@ class SettingsWindow(QDialog):
             commit_fn=self._db.commit,
             lazy=True,
         )
-        splitter.addWidget(self._sim_dict_tab)
-
-        splitter.setSizes([110, 500])
-        outer.addWidget(splitter, 1)
+        outer.addWidget(self._sim_dict_tab, 1)
         return w
 
     # ---------------------------------------------------------------- Firmy tab
@@ -1078,12 +1086,10 @@ class SettingsWindow(QDialog):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # === Zakładki słowników na górze, wypełniają całe okno ===
-        self._dict_tab_refs: list = []
-        sub = QTabWidget(w)
-        sub.setDocumentMode(True)
+        # === Dwa rzędy zakładek: QToolButton + QButtonGroup + QStackedWidget ===
+        from PySide6.QtWidgets import QStackedWidget, QToolButton, QButtonGroup, QHBoxLayout, QSizePolicy as _SP
 
-        for label, build_fn in [
+        DICT_TABS = [
             ("Firmy",                self._build_firmy_tab),
             ("Pojazdy",              self._build_pojazdy_tab),
             ("Monterzy",             self._build_monterzy_tab),
@@ -1091,17 +1097,66 @@ class SettingsWindow(QDialog):
             ("Model urządzenia",     self._build_device_models_tab),
             ("Urządzenia dodatkowe", self._build_extra_devices_tab),
             ("Linki flot",           self._build_linki_tab),
-        ]:
+        ]
+        ROW1 = 4
+
+        self._dict_tab_refs: list = []
+        stack = QStackedWidget(w)
+        for _, build_fn in DICT_TABS:
             tab = build_fn()
             self._dict_tab_refs.append(tab)
-            sub.addTab(tab, f"  {label}  ")
+            stack.addWidget(tab)
 
-        sub.currentChanged.connect(
-            lambda idx: self._dict_tab_refs[idx].ensure_loaded()
-            if idx < len(self._dict_tab_refs) else None
+        btn_style = (
+            "QToolButton {"
+            "  border: 1px solid #2e3340; border-bottom: 2px solid transparent;"
+            "  padding: 5px 14px; background: transparent; font-size: 9pt;"
+            "}"
+            "QToolButton:checked {"
+            "  font-weight: 600; border: 1px solid #3b82f6; border-bottom: 2px solid #3b82f6;"
+            "}"
+            "QToolButton:hover { background: rgba(255,255,255,0.05); }"
         )
 
-        outer.addWidget(sub, 1)
+        btn_group = QButtonGroup(w)
+        btn_group.setExclusive(True)
+
+        row1 = QWidget(w)
+        row1_lay = QHBoxLayout(row1)
+        row1_lay.setContentsMargins(0, 0, 0, 0)
+        row1_lay.setSpacing(0)
+
+        row2 = QWidget(w)
+        row2_lay = QHBoxLayout(row2)
+        row2_lay.setContentsMargins(0, 0, 0, 0)
+        row2_lay.setSpacing(0)
+
+        for i, (label, _) in enumerate(DICT_TABS):
+            btn = QToolButton(row1 if i < ROW1 else row2)
+            btn.setText(label)
+            btn.setCheckable(True)
+            btn.setSizePolicy(_SP.Expanding, _SP.Fixed)
+            btn.setStyleSheet(btn_style)
+            btn_group.addButton(btn, i)
+            if i < ROW1:
+                row1_lay.addWidget(btn)
+            else:
+                row2_lay.addWidget(btn)
+
+        def _on_btn(idx):
+            stack.setCurrentIndex(idx)
+            if idx < len(self._dict_tab_refs):
+                self._dict_tab_refs[idx].ensure_loaded()
+
+        btn_group.idClicked.connect(_on_btn)
+
+        # domyślnie pierwsza zakładka
+        btn_group.button(0).setChecked(True)
+        self._dict_tab_refs[0].ensure_loaded()
+
+        outer.addWidget(row1)
+        outer.addWidget(row2)
+        outer.addWidget(stack, 1)
         return w
 
     def _build_bulk_import_widget(self) -> QWidget:
@@ -1724,16 +1779,18 @@ class SettingsWindow(QDialog):
         )
         lay.addWidget(self._cb_fleet_params)
 
-        self._cb_theme = QCheckBox(" Jasny motyw aplikacji (Bright Mode)")
+        theme_row = QHBoxLayout()
+        theme_row.setAlignment(Qt.AlignVCenter)
+        self._cb_theme = QCheckBox(" Jasny motyw aplikacji")
         self._cb_theme.setStyleSheet(cb_style)
         self._cb_theme.setChecked(self._is_light)
         self._cb_theme.toggled.connect(self._on_theme_toggled)
-        lay.addWidget(self._cb_theme)
-
-        info = QLabel("ℹ  Zmiana motywu wymaga ponownego uruchomienia aplikacji (lub otwarcia nowych okien), aby w pełni zadziałała.")
-        info.setStyleSheet("color: #64748b; font-size: 9pt; margin-top: 10px;")
-        info.setWordWrap(True)
-        lay.addWidget(info)
+        theme_row.addWidget(self._cb_theme, 0, Qt.AlignVCenter)
+        info = QLabel("ℹ  Wymaga restartu aplikacji.")
+        info.setStyleSheet("color: #64748b; font-size: 9pt; margin-top: 3px;")
+        theme_row.addWidget(info, 0, Qt.AlignVCenter)
+        theme_row.addStretch()
+        lay.addLayout(theme_row)
 
         # --- Filtry ---
         grp_filters = QGroupBox("Filtry")
@@ -1821,18 +1878,18 @@ class SettingsWindow(QDialog):
         outer = QVBoxLayout(w)
         outer.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
+        scroll = QScrollArea(w)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
 
-        content = QWidget()
+        content = QWidget(scroll)
         lay = QVBoxLayout(content)
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(0)
 
         for i, entry in enumerate(CHANGELOG[:5]):
             if i > 0:
-                sep = QWidget()
+                sep = QWidget(content)
                 sep.setFixedHeight(1)
                 sep.setStyleSheet("background: #2e3340; margin: 4px 0;")
                 lay.addWidget(sep)

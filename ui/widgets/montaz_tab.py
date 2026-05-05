@@ -114,8 +114,31 @@ _INPUT_STYLE = f"""
     color: {_TEXT}; font-size: 9pt; padding: 2px 6px;
 """
 
-_CB_STYLE = f"QCheckBox {{ background: transparent; color: {_TEXT_DIM}; font-size: 9pt; spacing: 5px; }}"
-_RB_STYLE = f"QRadioButton {{ background: transparent; color: {_TEXT_DIM}; font-size: 9pt; spacing: 5px; }}"
+if _is_light:
+    _IND_BORDER   = "#cbd5e1"
+    _IND_BG       = "#ffffff"
+    _IND_CHECKED  = "#94a3b8"
+    _IND_CHK_BORD = "#64748b"
+    _IND_HOVER    = "#94a3b8"
+else:
+    _IND_BORDER   = "#3a4150"
+    _IND_BG       = "#2a2f3a"
+    _IND_CHECKED  = "#64748b"
+    _IND_CHK_BORD = "#94a3b8"
+    _IND_HOVER    = "#94a3b8"
+
+_CB_STYLE = (
+    f"QCheckBox {{ background: transparent; color: {_TEXT_DIM}; font-size: 9pt; spacing: 5px; }}"
+    f"QCheckBox::indicator {{ width: 15px; height: 15px; border: 1px solid {_IND_BORDER}; border-radius: 3px; background: {_IND_BG}; }}"
+    f"QCheckBox::indicator:hover {{ border-color: {_IND_HOVER}; }}"
+    f"QCheckBox::indicator:checked {{ background: {_IND_CHECKED}; border-color: {_IND_CHK_BORD}; }}"
+)
+_RB_STYLE = (
+    f"QRadioButton {{ background: transparent; color: {_TEXT_DIM}; font-size: 9pt; spacing: 5px; }}"
+    f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {_IND_BORDER}; border-radius: 7px; background: {_IND_BG}; }}"
+    f"QRadioButton::indicator:hover {{ border-color: {_IND_HOVER}; }}"
+    f"QRadioButton::indicator:checked {{ background: {_IND_CHECKED}; border-color: {_IND_CHK_BORD}; }}"
+)
 
 def _lbl(t: str, muted: bool = False) -> QLabel:
     l = QLabel(t)
@@ -719,7 +742,7 @@ class MontazTab(QWidget):
         self._duty_comment_edit.setVisible(False)
         duty_grid.addWidget(self._duty_comment_edit, 3, 0)
 
-        self._duty_time_edit = _inp("np. 00:30", w=70)
+        self._duty_time_edit = _inp("", w=70)
         duty_grid.addWidget(self._duty_time_edit, 3, 1)
 
         cz_l.addLayout(duty_grid)

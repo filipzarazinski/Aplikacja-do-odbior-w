@@ -428,14 +428,14 @@ class MainWindow(QMainWindow):
         inner_lay.addWidget(self._table, 1)
         root.addWidget(inner, 1)
 
-        self._status_bar = QStatusBar()
+        self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
         self._lbl_count = QLabel("Rekordów: 0")
         self._status_bar.addPermanentWidget(self._lbl_count)
         self._status_bar.showMessage("Gotowy")
 
     def _build_toolbar(self):
-        tb = QToolBar()
+        tb = QToolBar(self)
         tb.setMovable(False)
         tb.setIconSize(QSize(14, 14))
         tb.setToolButtonStyle(Qt.ToolButtonTextOnly)

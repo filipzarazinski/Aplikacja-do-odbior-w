@@ -40,17 +40,34 @@ class ServiceForm(QDialog):
     def __init__(self, parent=None, record: Optional[ServiceRecord] = None):
         super().__init__(parent)
         self._db = DatabaseManager.instance()
+        self._is_light = self._db.get_setting("theme_mode", "dark") == "light"
         self._record = record
         self._edit_mode = record is not None
         if not self._edit_mode:
             self._record = ServiceRecord(service_date=date.today().isoformat())
             self._record.record_type = " "
         self._setup_ui()
+        self._apply_dwm_titlebar()
         self._connect_signals()
         if self._edit_mode:
             self._tab_montaz.load_from_record(self._record)
         self._original_record = copy.deepcopy(self._record)
         self._tab_montaz.collect_to_record(self._original_record)
+
+    def _apply_dwm_titlebar(self) -> None:
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            mode = ctypes.c_int(0 if self._is_light else 1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 20, ctypes.byref(mode), ctypes.sizeof(mode)
+            )
+            DWMWA_COLOR_NONE = ctypes.c_uint(0xFFFFFFFE)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 34, ctypes.byref(DWMWA_COLOR_NONE), ctypes.sizeof(DWMWA_COLOR_NONE)
+            )
+        except Exception:
+            pass
 
     def _setup_ui(self):
         if self._edit_mode:
@@ -354,18 +371,21 @@ class ServiceForm(QDialog):
         if not self._is_dirty():
             super().reject()
             return
-        reply = QMessageBox.question(
-            self,
-            "Niezapisane zmiany",
-            "Czy chcesz zapisać zmiany przed zamknięciem?",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            QMessageBox.Yes
-        )
-        if reply == QMessageBox.Yes:
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Niezapisane zmiany")
+        msg.setText("Czy chcesz zapisać zmiany przed zamknięciem?")
+        msg.setIcon(QMessageBox.Question)
+        btn_save   = msg.addButton("Zapisz",  QMessageBox.YesRole)
+        btn_discard = msg.addButton("Nie zapisuj", QMessageBox.NoRole)
+        msg.addButton("Anuluj", QMessageBox.RejectRole)
+        msg.setDefaultButton(btn_save)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked == btn_save:
             self._on_save()
-        elif reply == QMessageBox.No:
+        elif clicked == btn_discard:
             super().reject()
-        # Jeśli Cancel -> nie rób nic (zostań w formularzu)
+        # Anuluj -> zostań w formularzu
 
     @Slot()
     def _on_save(self):
