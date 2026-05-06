@@ -2,6 +2,20 @@
 
 CHANGELOG = [
     {
+        "version": "1.1.9",
+        "date": "2026-05-06",
+        "entries": [
+            ("Lista główna", [
+                "Wyczyszczenie wyszukiwarki przyciskiem X odświeża tabelę automatycznie",
+            ]),
+            ("Ustawienia", [
+                "Zakładka 'Tabela główna' podzielona na podzakładki: Kolumny, Szybkie filtry i Kolory",
+                "Szybkie filtry: sekcja Daty z możliwością ukrycia i zmiany kolejności przycisków",
+                "Szybkie filtry: sekcja Wyszukiwarka – w pełni edytowalna lista własnych filtrów z możliwością zmiany kolejności",
+            ]),
+        ],
+    },
+    {
         "version": "1.1.8",
         "date": "2026-05-06",
         "entries": [

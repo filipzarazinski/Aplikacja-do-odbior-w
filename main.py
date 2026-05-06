@@ -1,6 +1,17 @@
 import sys
 import logging
 
+# W zamrożonej aplikacji wymuszamy CREATE_NO_WINDOW dla wszystkich subprocessów,
+# żeby biblioteki (requests, certifi itp.) nie tworzyły ghost-okien na Windows.
+if sys.platform == "win32" and getattr(sys, "frozen", False):
+    import subprocess as _sp
+    _orig_popen = _sp.Popen.__init__
+    def _popen_no_console(self, args, **kw):
+        kw.setdefault("creationflags", 0)
+        kw["creationflags"] |= _sp.CREATE_NO_WINDOW
+        _orig_popen(self, args, **kw)
+    _sp.Popen.__init__ = _popen_no_console
+
 from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont, QIcon
@@ -267,4 +278,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     sys.exit(main())

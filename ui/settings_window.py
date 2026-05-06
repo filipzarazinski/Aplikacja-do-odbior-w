@@ -7,6 +7,8 @@ import logging
 import os
 from typing import Optional
 
+import json as _json
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QTabWidget, QWidget,
     QLabel, QLineEdit, QPushButton, QFileDialog,
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QCheckBox, QColorDialog, QRadioButton, QButtonGroup,
     QMessageBox, QDialogButtonBox, QProgressDialog, QApplication,
     QStyledItemDelegate, QStyle, QStyleOptionViewItem,
+    QFormLayout,
 )
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QRect
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -608,9 +611,8 @@ class SettingsWindow(QDialog):
         tabs.setDocumentMode(True)
         tabs.tabBar().setExpanding(True)
         tabs.addTab(self._build_general_tab(),         "  Ogólne  ")
-        tabs.addTab(self._build_columns_tab(),         "  Kolumny  ")
+        tabs.addTab(self._build_columns_tab(),         "  Tabela główna  ")
         tabs.addTab(self._build_dicts_tab(),           "  Słowniki  ")
-        tabs.addTab(self._build_colors_tab(),          "  Kolory  ")
         tabs.addTab(self._build_about_tab(),           "  O aplikacji  ")
         root.addWidget(tabs, 1)
 
@@ -1446,6 +1448,18 @@ class SettingsWindow(QDialog):
 
     def _build_columns_tab(self) -> QWidget:
         w = QWidget()
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        inner_tabs = QTabWidget()
+        inner_tabs.addTab(self._build_columns_inner(),       "  Kolumny  ")
+        inner_tabs.addTab(self._build_quick_filters_inner(), "  Szybkie filtry  ")
+        inner_tabs.addTab(self._build_colors_tab(),          "  Kolory  ")
+        outer.addWidget(inner_tabs)
+        return w
+
+    def _build_columns_inner(self) -> QWidget:
+        w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(14, 14, 14, 10)
         lay.setSpacing(8)
@@ -1492,7 +1506,6 @@ class SettingsWindow(QDialog):
         move_row.addWidget(btn_up)
         move_row.addWidget(btn_down)
         move_row.addStretch()
-
         btn_all = QPushButton("Zaznacz wszystkie")
         btn_none = QPushButton("Odznacz wszystkie")
         btn_all.clicked.connect(lambda: self._set_all_checked(True))
@@ -1507,6 +1520,216 @@ class SettingsWindow(QDialog):
         lay.addWidget(btn_apply)
 
         return w
+
+    def _build_quick_filters_inner(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(14, 14, 14, 10)
+        lay.setSpacing(12)
+
+        _GRP_STYLE = "QGroupBox { font-size: 8pt; font-weight: 600; }"
+        _LIST_STYLE = (
+            "QListWidget { font-size: 8pt; }"
+            "QListWidget::item { padding: 0px 4px; min-height: 15px; }"
+            "QListWidget::indicator { width: 13px; height: 13px; background: transparent; border: none; }"
+            "QListWidget::indicator:checked { background: transparent; border: none; }"
+        )
+        _BTN_STYLE = "QPushButton { font-size: 8.5pt; padding: 3px 10px; min-height: 22px; max-height: 22px; }"
+
+        # ── Sekcja: Daty ──────────────────────────────────────────────────────
+        DATE_LABELS = {
+            "today":      "Dzisiaj",
+            "week":       "Ten tydzień",
+            "month":      "Aktualny miesiąc",
+            "prev_month": "Poprzedni miesiąc",
+            "year":       "Ten rok",
+            "all_time":   "Cała historia",
+        }
+        date_grp = QGroupBox("Daty  ·  przeciągnij aby zmienić kolejność")
+        date_grp.setStyleSheet(_GRP_STYLE)
+        date_l = QVBoxLayout(date_grp)
+        date_l.setSpacing(2)
+
+        self._qf_date_list = QListWidget()
+        self._qf_date_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self._qf_date_list.setDefaultDropAction(Qt.MoveAction)
+        self._qf_date_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._qf_date_list.setStyleSheet(_LIST_STYLE)
+        self._qf_date_list.setItemDelegate(_ColCheckDelegate(self._is_light, self._qf_date_list))
+
+        raw_date = self._db.get_setting("quick_filters_date", "")
+        try:
+            self._qf_date_data: list = _json.loads(raw_date) if raw_date else [
+                {"key": k, "visible": True} for k in DATE_LABELS
+            ]
+        except Exception:
+            self._qf_date_data = [{"key": k, "visible": True} for k in DATE_LABELS]
+
+        if not raw_date:
+            for df in self._qf_date_data:
+                df["visible"] = self._db.get_setting(f"quick_filter_vis_{df['key']}", "1") == "1"
+
+        self._qf_date_list.blockSignals(True)
+        for df in self._qf_date_data:
+            label = DATE_LABELS.get(df.get("key", ""), df.get("key", ""))
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, df.get("key"))
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
+            item.setCheckState(Qt.Checked if df.get("visible", True) else Qt.Unchecked)
+            self._qf_date_list.addItem(item)
+        self._qf_date_list.blockSignals(False)
+
+        self._qf_date_list.itemChanged.connect(self._qf_date_save)
+        self._qf_date_list.model().rowsMoved.connect(self._qf_date_save)
+        date_l.addWidget(self._qf_date_list)
+        lay.addWidget(date_grp, 1)
+
+        # ── Sekcja: Wyszukiwarka ──────────────────────────────────────────────
+        search_grp = QGroupBox("Wyszukiwarka  ·  przeciągnij aby zmienić kolejność")
+        search_grp.setStyleSheet(_GRP_STYLE)
+        search_l = QVBoxLayout(search_grp)
+        search_l.setSpacing(4)
+
+        hint = QLabel("Zaznaczony filtr pojawia się w pasku. Kliknięcie wpisuje zapytanie do wyszukiwarki.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #94a3b8; font-size: 7.5pt;")
+        search_l.addWidget(hint)
+
+        self._qf_search_list = QListWidget()
+        self._qf_search_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self._qf_search_list.setDefaultDropAction(Qt.MoveAction)
+        self._qf_search_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._qf_search_list.setStyleSheet(_LIST_STYLE)
+        self._qf_search_list.setItemDelegate(_ColCheckDelegate(self._is_light, self._qf_search_list))
+        self._qf_search_list.itemChanged.connect(self._qf_search_on_item_changed)
+        self._qf_search_list.model().rowsMoved.connect(self._qf_search_save)
+        search_l.addWidget(self._qf_search_list, 1)
+
+        raw = self._db.get_setting("quick_filters_search", "")
+        if raw:
+            try:
+                self._qf_search_data: list = _json.loads(raw)
+            except Exception:
+                self._qf_search_data = []
+        else:
+            self._qf_search_data = []
+            try:
+                old_custom = _json.loads(self._db.get_setting("quick_filters_custom", "[]"))
+                self._qf_search_data.extend(old_custom)
+            except Exception:
+                pass
+
+        self._qf_refresh_search_list()
+
+        btn_row = QHBoxLayout()
+        btn_add  = QPushButton("＋ Dodaj")
+        btn_edit = QPushButton("✎ Edytuj")
+        btn_del  = QPushButton("✕ Usuń")
+        for b in (btn_add, btn_edit, btn_del):
+            b.setStyleSheet(_BTN_STYLE)
+            btn_row.addWidget(b)
+        btn_row.addStretch()
+        btn_add.clicked.connect(self._on_qf_add)
+        btn_edit.clicked.connect(self._on_qf_edit_selected)
+        btn_del.clicked.connect(self._on_qf_delete_selected)
+        search_l.addLayout(btn_row)
+
+        lay.addWidget(search_grp, 1)
+        return w
+
+    def _qf_date_save(self):
+        data = []
+        for i in range(self._qf_date_list.count()):
+            item = self._qf_date_list.item(i)
+            data.append({"key": item.data(Qt.UserRole), "visible": item.checkState() == Qt.Checked})
+        self._qf_date_data = data
+        self._db.set_setting("quick_filters_date", _json.dumps(data, ensure_ascii=False))
+
+    def _qf_refresh_search_list(self):
+        self._qf_search_list.blockSignals(True)
+        self._qf_search_list.clear()
+        for sf in self._qf_search_data:
+            name  = sf.get("name", "")
+            query = sf.get("query", "")
+            text  = f"{name}  –  {query}" if query else name
+            item  = QListWidgetItem(text)
+            item.setData(Qt.UserRole, dict(sf))
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
+            item.setCheckState(Qt.Checked if sf.get("visible", True) else Qt.Unchecked)
+            self._qf_search_list.addItem(item)
+        self._qf_search_list.blockSignals(False)
+
+    def _qf_search_on_item_changed(self, item: QListWidgetItem):
+        idx = self._qf_search_list.row(item)
+        if 0 <= idx < len(self._qf_search_data):
+            self._qf_search_data[idx]["visible"] = (item.checkState() == Qt.Checked)
+            self._qf_search_save()
+
+    def _qf_search_save(self):
+        data = []
+        for i in range(self._qf_search_list.count()):
+            item = self._qf_search_list.item(i)
+            entry = dict(item.data(Qt.UserRole) or {})
+            entry["visible"] = (item.checkState() == Qt.Checked)
+            data.append(entry)
+        self._qf_search_data = data
+        self._db.set_setting("quick_filters_search", _json.dumps(data, ensure_ascii=False))
+
+    def _on_qf_add(self):
+        result = self._qf_edit_dialog()
+        if result:
+            result["visible"] = True
+            self._qf_search_data.append(result)
+            self._qf_refresh_search_list()
+            self._qf_search_save()
+
+    def _on_qf_edit_selected(self):
+        row = self._qf_search_list.currentRow()
+        if row < 0:
+            return
+        result = self._qf_edit_dialog(self._qf_search_data[row])
+        if result:
+            result["visible"] = self._qf_search_data[row].get("visible", True)
+            self._qf_search_data[row] = result
+            self._qf_refresh_search_list()
+            self._qf_search_save()
+
+    def _on_qf_delete_selected(self):
+        row = self._qf_search_list.currentRow()
+        if row < 0:
+            return
+        self._qf_search_data.pop(row)
+        self._qf_refresh_search_list()
+        self._qf_search_save()
+
+    def _qf_edit_dialog(self, existing: dict = None) -> dict | None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Filtr wyszukiwania")
+        dlg.setMinimumWidth(380)
+        lay = QVBoxLayout(dlg)
+        form = QFormLayout()
+        name_edit = QLineEdit(existing.get("name", "") if existing else "")
+        name_edit.setPlaceholderText("np. FM2 Montaże")
+        query_edit = QLineEdit(existing.get("query", "") if existing else "")
+        query_edit.setPlaceholderText("np. flota:FM2 typ:Montaż")
+        form.addRow("Nazwa:", name_edit)
+        form.addRow("Zapytanie:", query_edit)
+        lay.addLayout(form)
+        hint = QLabel("Zapytanie wpisywane jest do wyszukiwarki — używaj tej samej składni co w głównym oknie.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #64748b; font-size: 8pt;")
+        lay.addWidget(hint)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        name = name_edit.text().strip()
+        query = query_edit.text().strip()
+        if not name:
+            return None
+        return {"name": name, "query": query}
 
     # ---------------------------------------------------------------- General settings tab
 

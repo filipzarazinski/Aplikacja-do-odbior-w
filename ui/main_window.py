@@ -506,55 +506,50 @@ class MainWindow(QMainWindow):
         main_lay.setSpacing(8)
 
         # -- Górny wiersz (Szybkie filtry) --
-        q_lay = QHBoxLayout()
-        q_lay.setSpacing(8)
-        
+        self._q_lay = QHBoxLayout()
+        self._q_lay.setSpacing(8)
+
         lbl_q = QLabel("SZYBKIE FILTRY:")
         lbl_fg = "#334155" if self._is_light else "#ffffff"
         lbl_q.setStyleSheet(
             f"color: {lbl_fg}; font-size: 8pt; font-weight: bold; "
             "letter-spacing: 1px; background: transparent; border: none;"
         )
-        q_lay.addWidget(lbl_q)
-        
-        btn_q_style = f"""
-            QPushButton {{
-              min-height: 22px; max-height: 22px; font-size: 8.5pt;
-              background: {bg_input}; color: {text}; border: 1px solid {border_input}; border-radius: 3px;
-              padding: 0 10px;
-            }}
-            QPushButton:hover {{ background: {bg_hover}; border-color: #64748b; }}
-        """
+        self._q_lay.addWidget(lbl_q)
+
+        self._btn_q_style = (
+            f"QPushButton {{"
+            f"  min-height: 22px; max-height: 22px; font-size: 8.5pt;"
+            f"  background: {bg_input}; color: {text}; border: 1px solid {border_input}; border-radius: 3px;"
+            f"  padding: 0 10px;"
+            f"}}"
+            f"QPushButton:hover {{ background: {bg_hover}; border-color: #64748b; }}"
+        )
 
         self._btn_q_today       = QPushButton("Dzisiaj")
         self._btn_q_week        = QPushButton("Ten tydzień")
-        self._btn_q_month       = QPushButton("Ostatni miesiąc")
+        self._btn_q_month       = QPushButton("Aktualny miesiąc")
         self._btn_q_prev_month  = QPushButton("Poprzedni miesiąc")
         self._btn_q_year        = QPushButton("Ten rok")
-        self._btn_q_duty        = QPushButton("Tylko dyżur")
-        self._btn_q_no_duty     = QPushButton("Bez dyżuru")
+        self._btn_q_all_time    = QPushButton("Cała historia")
 
         for btn in (self._btn_q_today, self._btn_q_week, self._btn_q_month,
-                    self._btn_q_prev_month, self._btn_q_year,
-                    self._btn_q_duty, self._btn_q_no_duty):
+                    self._btn_q_prev_month, self._btn_q_year, self._btn_q_all_time):
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet(btn_q_style)
-            q_lay.addWidget(btn)
+            btn.setStyleSheet(self._btn_q_style)
+            self._q_lay.addWidget(btn)
 
         self._btn_q_today.clicked.connect(self._on_q_today)
         self._btn_q_week.clicked.connect(self._on_q_week)
         self._btn_q_month.clicked.connect(self._on_q_month)
         self._btn_q_prev_month.clicked.connect(self._on_q_prev_month)
         self._btn_q_year.clicked.connect(self._on_q_year)
-        self._btn_q_duty.clicked.connect(lambda: self._on_q_duty(True))
-        self._btn_q_no_duty.clicked.connect(lambda: self._on_q_duty(False))
+        self._btn_q_all_time.clicked.connect(self._on_q_all_time)
 
-        is_duty = self._db.get_setting("show_duty_section", "1") == "1"
-        self._btn_q_duty.setVisible(is_duty)
-        self._btn_q_no_duty.setVisible(is_duty)
-
-        q_lay.addStretch()
-        main_lay.addLayout(q_lay)
+        self._custom_filter_btns: list = []
+        self._q_lay.addStretch()
+        main_lay.addLayout(self._q_lay)
+        self._refresh_quick_filters()
 
         # -- Dolny wiersz (Szukaj, Daty, Akcje) --
         lay = QHBoxLayout()
@@ -871,6 +866,7 @@ class MainWindow(QMainWindow):
         self._btn_filter.clicked.connect(self._on_filter)
         self._btn_clear.clicked.connect(self._on_clear_filter)
         self._filter_search.returnPressed.connect(self._on_filter)
+        self._filter_search.textChanged.connect(self._on_search_text_changed)
         self._btn_search_label.clicked.connect(self._on_filter)
 
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -1351,6 +1347,17 @@ class MainWindow(QMainWindow):
         self._on_filter()
 
     @Slot()
+    def _on_q_all_time(self):
+        self._filter_date_from.setDate(QDate(2020, 1, 1))
+        self._filter_date_to.setDate(QDate.currentDate())
+        self._on_filter()
+
+    @Slot(str)
+    def _on_search_text_changed(self, text: str):
+        if not text:
+            self._on_filter()
+
+    @Slot()
     def _on_q_no_phone(self):
         current_search = self._filter_search.text().strip()
         terms = [t for t in current_search.split() if not t.lower().startswith("typ:")]
@@ -1358,15 +1365,62 @@ class MainWindow(QMainWindow):
         self._filter_search.setText(" ".join(terms))
         self._on_filter()
 
-    @Slot(bool)
-    def _on_q_duty(self, only_duty: bool):
-        current_search = self._filter_search.text().strip()
-        terms = [t for t in current_search.split() if not t.startswith("dyżur:")]
-        if only_duty:
-            terms.append("dyżur:dyżur")
-        else:
-            terms.append("dyżur:")
-        self._filter_search.setText(" ".join(terms))
+    def _refresh_quick_filters(self):
+        import json
+        _date_map = {
+            "today":      self._btn_q_today,
+            "week":       self._btn_q_week,
+            "month":      self._btn_q_month,
+            "prev_month": self._btn_q_prev_month,
+            "year":       self._btn_q_year,
+            "all_time":   self._btn_q_all_time,
+        }
+        for btn in _date_map.values():
+            self._q_lay.removeWidget(btn)
+            btn.hide()
+
+        raw_date = self._db.get_setting("quick_filters_date", "")
+        try:
+            date_filters = json.loads(raw_date) if raw_date else [
+                {"key": k, "visible": True} for k in _date_map
+            ]
+        except Exception:
+            date_filters = [{"key": k, "visible": True} for k in _date_map]
+
+        insert_pos = 1  # after the "SZYBKIE FILTRY:" label
+        for df in date_filters:
+            btn = _date_map.get(df.get("key"))
+            if btn and df.get("visible", True):
+                self._q_lay.insertWidget(insert_pos, btn)
+                btn.show()
+                insert_pos += 1
+
+        for btn in self._custom_filter_btns:
+            self._q_lay.removeWidget(btn)
+            btn.deleteLater()
+        self._custom_filter_btns.clear()
+
+        raw = self._db.get_setting("quick_filters_search", "")
+        try:
+            search_filters = json.loads(raw) if raw else []
+        except Exception:
+            search_filters = []
+        for sf in search_filters:
+            if not sf.get("visible", True):
+                continue
+            name = sf.get("name", "").strip()
+            query = sf.get("query", "").strip()
+            if not name:
+                continue
+            btn = QPushButton(name)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(self._btn_q_style)
+            btn.clicked.connect(lambda checked=False, q=query: self._on_q_custom(q))
+            self._q_lay.insertWidget(self._q_lay.count() - 1, btn)
+            self._custom_filter_btns.append(btn)
+
+    def _on_q_custom(self, query: str):
+        self._filter_search.setText(query)
         self._on_filter()
 
     @Slot()
@@ -1376,9 +1430,7 @@ class MainWindow(QMainWindow):
         dlg.columns_changed.connect(self._on_columns_changed)
         dlg.exec()
 
-        is_duty = self._db.get_setting("show_duty_section", "1") == "1"
-        self._btn_q_duty.setVisible(is_duty)
-        self._btn_q_no_duty.setVisible(is_duty)
+        self._refresh_quick_filters()
         self._on_filter()
 
     @Slot(set, list)
