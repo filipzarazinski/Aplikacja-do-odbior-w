@@ -1282,8 +1282,8 @@ class MainWindow(QMainWindow):
             if rec:
                 typ_val = rec.record_type.strip() if rec.record_type else ""
                 if typ_val == "Telefon":
-                    comment = " ".join((rec.comment or "").split())
-                    line = f"{rec.company_name} - {comment}" if comment else f"{rec.company_name} -"
+                    duty_comment = rec.config_json.get("komentarzDyzuru", "").strip()
+                    line = f"{rec.company_name} - {duty_comment}" if duty_comment else f"{rec.company_name} -"
                 else:
                     duty_comment = rec.config_json.get("komentarzDyzuru", "").strip()
                     base = f"{typ_val} - {rec.company_name} - {rec.license_plate}"

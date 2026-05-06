@@ -507,3 +507,29 @@ QCalendarWidget QWidget#qt_calendar_navigationbar {
     background-color: #15181e;
     padding: 4px;
 }
+
+
+/* --- Menu kontekstowe --- */
+QMenu {
+    background-color: #22262f;
+    border: 1px solid #3a4150;
+    border-radius: 4px;
+    padding: 4px 0;
+    color: #e2e8f0;
+}
+QMenu::item {
+    padding: 5px 24px 5px 12px;
+    border-radius: 3px;
+}
+QMenu::item:selected {
+    background-color: #3b82f6;
+    color: #ffffff;
+}
+QMenu::item:disabled {
+    color: #475569;
+}
+QMenu::separator {
+    height: 1px;
+    background: #3a4150;
+    margin: 3px 8px;
+}

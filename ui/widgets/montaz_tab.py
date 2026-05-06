@@ -641,7 +641,7 @@ class MontazTab(QWidget):
         din_l = QVBoxLayout(din_w); din_l.setContentsMargins(0,0,0,0); din_l.setSpacing(6)
 
         dg = QGridLayout()
-        dg.setVerticalSpacing(8) 
+        dg.setVerticalSpacing(8)
         dg.setHorizontalSpacing(6)
 
         dg.addWidget(_lbl("Nazwa", True), 0, 0, Qt.AlignVCenter)
@@ -736,7 +736,8 @@ class MontazTab(QWidget):
         self._duty_cb = _cb("Dyżur")
         duty_grid.addWidget(self._duty_cb, 1, 1, Qt.AlignRight)
 
-        duty_grid.addWidget(_lbl("Czas dyżuru"), 2, 1, Qt.AlignRight)
+        self._duty_time_lbl = _lbl("Czas dyżuru")
+        duty_grid.addWidget(self._duty_time_lbl, 2, 1, Qt.AlignRight)
 
         self._duty_comment_edit = _inp("Komentarz do dyżuru", w=220)
         self._duty_comment_edit.setVisible(False)
@@ -746,6 +747,7 @@ class MontazTab(QWidget):
         duty_grid.addWidget(self._duty_time_edit, 3, 1)
 
         cz_l.addLayout(duty_grid)
+        self._update_duty_section_visibility()
         
         # Ukrywanie sekcji na podstawie ustawienia w bazie
         if self._db.get_setting("show_duty_section", "1") == "0":
@@ -826,7 +828,7 @@ class MontazTab(QWidget):
         # Podpięcie automatycznego dyżuru pod zmianę daty i godziny
         self._time_edit.timeChanged.connect(self._update_duty_auto_check)
         self._date_edit.dateChanged.connect(self._update_duty_auto_check)
-        self._duty_cb.toggled.connect(self._update_duty_comment_visibility)
+        self._duty_cb.toggled.connect(self._update_duty_section_visibility)
         self._duty_time_edit.textChanged.connect(self._update_duty_comment_visibility)
 
         self._plate_format_cb.stateChanged.connect(lambda: self._format_plate(self._plate_edit.text()))
@@ -883,6 +885,8 @@ class MontazTab(QWidget):
 
     @Slot(bool)
     def _on_dodanie_toggled(self, checked: bool):
+        if not self._initialized:
+            return
         if checked:
             current = self._parse_duty_minutes(self._duty_time_edit.text())
             total = current + 15
@@ -900,9 +904,22 @@ class MontazTab(QWidget):
             self._update_duty_comment_visibility()
 
     @Slot()
+    def _update_duty_section_visibility(self):
+        on = self._duty_cb.isChecked()
+        self._dodanie_cb.setVisible(on)
+        self._duty_time_lbl.setVisible(on)
+        self._duty_time_edit.setVisible(on)
+        if not on:
+            self._duty_comment_edit.setVisible(False)
+            self._duty_comment_edit.clear()
+        else:
+            self._update_duty_comment_visibility()
+
+    @Slot()
     def _update_duty_comment_visibility(self):
+        is_telefon = self._typ_rbs.get("Telefon") and self._typ_rbs["Telefon"].isChecked()
         minutes = self._parse_duty_minutes(self._duty_time_edit.text())
-        visible = self._duty_cb.isChecked() and minutes > 30
+        visible = is_telefon or minutes > 30
         self._duty_comment_edit.setVisible(visible)
         if not visible:
             self._duty_comment_edit.clear()
@@ -1135,21 +1152,20 @@ class MontazTab(QWidget):
             for btn in self._typ_grp.buttons():
                 if btn != clicked_btn:
                     btn.setChecked(False)
-                    
-            if hasattr(self, "_duty_time_edit"):
+
+            if self._initialized and hasattr(self, "_duty_time_edit"):
                 typ_text = clicked_btn.text()
-                if typ_text in ("Montaż", "Upgrade", "Przekładka"):
-                    self._duty_time_edit.setText("0:30")
-                elif typ_text == "Demontaż":
-                    self._duty_time_edit.setText("0:15")
-                elif typ_text == "Serwis":
-                    self._duty_time_edit.setText("0:20")
-                elif typ_text == "Telefon":
-                    self._duty_time_edit.setText("")
-        
+                base = {"Montaż": 30, "Upgrade": 30, "Przekładka": 30,
+                        "Demontaż": 15, "Serwis": 20}.get(typ_text)
+                if base is not None:
+                    total = base + (15 if self._dodanie_cb.isChecked() else 0)
+                    self._duty_time_edit.setText(f"{total // 60}:{total % 60:02d}")
+
         is_przekladka = self._typ_rbs.get("Przekładka") and self._typ_rbs["Przekładka"].isChecked()
         self._przek_lbl_w.setVisible(is_przekladka)
         self._przek_rej_edit.setVisible(is_przekladka)
+        if self._initialized:
+            self._update_duty_comment_visibility()
 
     @Slot(str)
     def _on_vehicle_type_changed(self, vehicle_type: str):
@@ -1261,7 +1277,7 @@ class MontazTab(QWidget):
         if self._rfid_cb.isChecked(): add_cfg["rfid"] = "1"
         
         add_cfg["ccid"] = self._ccid_edit.text().strip()
-        if self._przek_lbl_w.isVisible():
+        if self._typ_rbs.get("Przekładka") and self._typ_rbs["Przekładka"].isChecked():
             add_cfg["przekladkaRej"] = self._przek_rej_edit.text()
 
         return {"canConfig":can_cfg, "dinConfig":din_cfg, "additionalConfig":add_cfg,
@@ -1339,7 +1355,9 @@ class MontazTab(QWidget):
             "dinConfig": tmp.config_json.get("dinConfig", {}),
             "odebrane": tmp.config_json.get("odebrane", False),
             "dyzur": tmp.config_json.get("dyzurZaznaczony", False),
+            "dodanieDoSystemu": tmp.config_json.get("dodanieDoSystemu", False),
             "czasDyzuru": tmp.duty_time_min or "",
+            "komentarzDyzuru": tmp.config_json.get("komentarzDyzuru", ""),
             "przekladkaZ": add_cfg.get("przekladkaRej", "")
         }
         return json.dumps(full, ensure_ascii=False, indent=2)
@@ -1367,8 +1385,6 @@ class MontazTab(QWidget):
             self._private_comment_edit.setPlainText(rec.config_json.get("komentarzPrywatny",""))
             self._duty_time_edit.setText(str(rec.duty_time_min) if rec.duty_time_min else "")
             self._duty_comment_edit.setText(rec.config_json.get("komentarzDyzuru", ""))
-            self._dodanie_cb.setChecked(False)
-            self._update_duty_comment_visibility()
             self._recorder_loc_edit.setText(rec.recorder_location or "")
             self._odebrane_cb.setChecked(rec.config_json.get("odebrane", False))
             
@@ -1471,6 +1487,9 @@ class MontazTab(QWidget):
                 is_duty_time = h >= 15 or h < 6 or (h == 6 and m <= 55)
                 self._duty_cb.setChecked(is_weekend or is_duty_time)
 
+            self._dodanie_cb.setChecked(rec.config_json.get("dodanieDoSystemu", False))
+            self._update_duty_section_visibility()
+
         finally:
             self._initialized = was
 
@@ -1563,6 +1582,7 @@ class MontazTab(QWidget):
         rec.config_json["komentarzPrywatny"] = self._private_comment_edit.toPlainText().strip()
         rec.config_json["odebrane"] = self._odebrane_cb.isChecked()
         rec.config_json["dyzurZaznaczony"] = self._duty_cb.isChecked()
+        rec.config_json["dodanieDoSystemu"] = self._dodanie_cb.isChecked()
         rec.config_json["komentarzDyzuru"] = self._duty_comment_edit.text().strip()
         
         rec.config_json["sondyRaw"] = {

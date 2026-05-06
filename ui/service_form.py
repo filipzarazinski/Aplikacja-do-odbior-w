@@ -54,10 +54,10 @@ class ServiceForm(QDialog):
         self._original_record = copy.deepcopy(self._record)
         self._tab_montaz.collect_to_record(self._original_record)
 
-    def _apply_dwm_titlebar(self) -> None:
+    def _apply_dwm_titlebar(self, widget=None) -> None:
         try:
             import ctypes
-            hwnd = int(self.winId())
+            hwnd = int((widget or self).winId())
             mode = ctypes.c_int(0 if self._is_light else 1)
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd, 20, ctypes.byref(mode), ctypes.sizeof(mode)
@@ -78,6 +78,7 @@ class ServiceForm(QDialog):
         self.setWindowTitle(title)
         self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
         self.setMinimumSize(FORM_WIDTH, FORM_HEIGHT)
+        QShortcut(QKeySequence("Ctrl+W"), self, activated=self.reject)
         settings = QSettings("TwojaFirma", "SystemOdbiory")
         w = settings.value("form/width", FORM_WIDTH, type=int)
         h = settings.value("form/height", FORM_HEIGHT, type=int)
@@ -322,10 +323,7 @@ class ServiceForm(QDialog):
         wersja_tacho = j.get("wersjaTacho", "")
         rec.firmware_tacho = f"{model_tacho} {wersja_tacho}".strip()
 
-        try:
-            rec.duty_time_min = int(j.get("czasDyzuru")) if j.get("czasDyzuru") not in ("", None) else None
-        except (ValueError, TypeError):
-            rec.duty_time_min = None
+        rec.duty_time_min = j.get("czasDyzuru") or None
 
         sondy = {}
         for key in ("an0Pojemnosc", "an0Skalowanie", "an1Pojemnosc", "an1Skalowanie"):
@@ -339,13 +337,15 @@ class ServiceForm(QDialog):
             add_cfg["przekladkaRej"] = j["przekladkaZ"]
 
         rec.config_json = {
-            "canConfig":       j.get("canConfig", {}),
-            "dinConfig":       j.get("dinConfig", {}),
+            "canConfig":        j.get("canConfig", {}),
+            "dinConfig":        j.get("dinConfig", {}),
             "additionalConfig": add_cfg,
-            "odebrane":        j.get("odebrane", False),
-            "dyzurZaznaczony": j.get("dyzur", False),
+            "odebrane":         j.get("odebrane", False),
+            "dyzurZaznaczony":  j.get("dyzur", False),
+            "dodanieDoSystemu": j.get("dodanieDoSystemu", False),
             "komentarzPrywatny": j.get("komentarzPrywatny", ""),
-            "sondyRaw":        sondy,
+            "komentarzDyzuru":  j.get("komentarzDyzuru", ""),
+            "sondyRaw":         sondy,
         }
         return rec
 
@@ -375,10 +375,11 @@ class ServiceForm(QDialog):
         msg.setWindowTitle("Niezapisane zmiany")
         msg.setText("Czy chcesz zapisać zmiany przed zamknięciem?")
         msg.setIcon(QMessageBox.Question)
-        btn_save   = msg.addButton("Zapisz",  QMessageBox.YesRole)
+        btn_save    = msg.addButton("Zapisz",      QMessageBox.YesRole)
         btn_discard = msg.addButton("Nie zapisuj", QMessageBox.NoRole)
         msg.addButton("Anuluj", QMessageBox.RejectRole)
         msg.setDefaultButton(btn_save)
+        self._apply_dwm_titlebar(msg)
         msg.exec()
         clicked = msg.clickedButton()
         if clicked == btn_save:

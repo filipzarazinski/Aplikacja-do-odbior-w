@@ -89,6 +89,8 @@ class DictTab(QWidget):
         add_labels: list[str] = None,
         commit_fn: Callable = None,
         lazy: bool = False,
+        show_import: bool = True,
+        manual_load: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -100,6 +102,8 @@ class DictTab(QWidget):
         self._excel_parser = excel_parser
         self._add_labels = add_labels or headers
         self._commit = commit_fn or (lambda: None)
+        self._show_import = show_import
+        self._manual_load = manual_load
         self._lazy = lazy
         self._loaded = False
         self._row_ids: list[int] = []
@@ -169,10 +173,18 @@ class DictTab(QWidget):
         btn_row.addWidget(btn_del)
         btn_row.addWidget(btn_clear)
         btn_row.addStretch()
-        btn_row.addWidget(btn_imp)
+        if self._show_import:
+            btn_row.addWidget(btn_imp)
         layout.addLayout(btn_row)
 
-        if not lazy:
+        if manual_load:
+            self._load_btn = QPushButton("📋  Pokaż karty SIM")
+            self._load_btn.setObjectName("btn_primary")
+            self._load_btn.setFixedHeight(28)
+            self._load_btn.clicked.connect(self._on_manual_load)
+            layout.insertWidget(layout.count() - 1, self._load_btn)
+            self._info_lbl.setText("Nie załadowano")
+        elif not lazy:
             self.refresh()
         else:
             self._info_lbl.setText("Nie załadowano")
@@ -181,8 +193,13 @@ class DictTab(QWidget):
 
     def ensure_loaded(self):
         """Ładuje dane jeśli jeszcze nie były ładowane (lazy load)."""
-        if not self._loaded:
-            self.refresh()
+        if self._manual_load or self._loaded:
+            return
+        self.refresh()
+
+    def _on_manual_load(self):
+        self._load_btn.setVisible(False)
+        self.refresh()
 
     def refresh(self):
         self._loaded = True

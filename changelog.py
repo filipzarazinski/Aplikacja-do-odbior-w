@@ -2,6 +2,16 @@
 
 CHANGELOG = [
     {
+        "version": "1.1.8",
+        "date": "2026-05-06",
+        "entries": [
+            ("Formularz", [
+                "Ctrl+W zamyka formularz",
+                "Drobne poprawki zapisu formularza",
+            ]),
+        ],
+    },
+    {
         "version": "1.1.7",
         "date": "2026-05-05",
         "entries": [

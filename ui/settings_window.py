@@ -749,6 +749,8 @@ class SettingsWindow(QDialog):
             add_labels=["Numer SIM", "CCID"],
             commit_fn=self._db.commit,
             lazy=True,
+            show_import=False,
+            manual_load=True,
         )
         outer.addWidget(self._sim_dict_tab, 1)
         return w
@@ -1041,42 +1043,49 @@ class SettingsWindow(QDialog):
                 "sheet": "Firmy",
                 "parser": parse_firmy,
                 "saver": lambda v: db.upsert_company_with_fleet(v[0], v[1] if len(v) > 1 else ""),
+                "counter": lambda: len(db.get_all_companies_with_fleet()),
             },
             {
                 "name": "Pojazdy",
                 "sheet": "Model_Typ",
                 "parser": parse_pojazdy,
                 "saver": lambda v: db.upsert_vehicle_model(v[0], v[1] if len(v) > 1 else ""),
+                "counter": lambda: len(db.get_all_vehicle_models()),
             },
             {
                 "name": "Monterzy",
                 "sheet": "Monterzy",
                 "parser": parse_single("monter"),
                 "saver": lambda v: db.upsert_technician(Technician(full_name=v[0])),
+                "counter": lambda: len(db.get_all_technicians(active_only=False)),
             },
             {
                 "name": "Gdzie rejestrator",
                 "sheet": "GdzieRejestrator",
                 "parser": parse_single("lokalizacja"),
                 "saver": lambda v: db.upsert_recorder_location(v[0]),
+                "counter": lambda: len(db.get_all_recorder_locations()),
             },
             {
                 "name": "Model urządzenia",
                 "sheet": "ModelUrzadzenia",
                 "parser": parse_single("model", "model urządzenia"),
                 "saver": lambda v: db.upsert_device_model(v[0]),
+                "counter": lambda: len(db.get_all_device_models()),
             },
             {
                 "name": "Urządzenia dodatkowe",
                 "sheet": "UrzadzeniaDodatkowe",
                 "parser": parse_extra_devices,
                 "saver": lambda v: db.upsert_extra_device(v[1] if len(v) > 1 else "", v[0]),
+                "counter": lambda: len(db.get_all_extra_devices()),
             },
             {
                 "name": "Linki flot",
                 "sheet": "Linki",
                 "parser": parse_linki,
                 "saver": lambda v: db.upsert_fleet_link(v[0], v[1] if len(v) > 1 else ""),
+                "counter": lambda: len(db.get_all_fleet_links()),
             },
         ]
 
@@ -1211,7 +1220,12 @@ class SettingsWindow(QDialog):
         for i, cfg in enumerate(configs):
             self._bulk_table.setItem(i, 0, QTableWidgetItem(cfg["name"]))
             self._bulk_table.setItem(i, 1, QTableWidgetItem(cfg["sheet"]))
-            self._bulk_table.setItem(i, 2, QTableWidgetItem("–"))
+            try:
+                n = cfg["counter"]()
+                text = f"{n} rekordów"
+            except Exception:
+                text = "–"
+            self._bulk_table.setItem(i, 2, QTableWidgetItem(text))
 
         lay.addWidget(self._bulk_table, 1)
         return w
@@ -1220,6 +1234,19 @@ class SettingsWindow(QDialog):
         for tab in getattr(self, "_dict_tab_refs", []):
             if hasattr(tab, "refresh"):
                 tab.refresh()
+        self._refresh_bulk_counts()
+
+    def _refresh_bulk_counts(self):
+        configs = self._get_bulk_configs()
+        for i, cfg in enumerate(configs):
+            try:
+                n = cfg["counter"]()
+                text = f"{n} rekordów"
+            except Exception:
+                text = "–"
+            item = self._bulk_table.item(i, 2)
+            if item:
+                item.setText(text)
 
     def _on_bulk_browse(self):
         path, _ = QFileDialog.getOpenFileName(
