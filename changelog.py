@@ -2,6 +2,18 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.0",
+        "date": "2026-05-11",
+        "entries": [
+            ("Lista główna", [
+                "Filtry kolumnowe – kliknij ▼ w nagłówku kolumny aby filtrować wartości jak w Excelu",
+                "Prawy klik na nagłówku kolumny – opcja wyczyszczenia wszystkich filtrów kolumn",
+                "Prawy klik na wierszu: nowy układ sekcji – Przejdź do floty / Odśwież, Edytuj, Duplikuj, Usuń / Kopiuj do dyżurów",
+                "F5 odświeża tabelę z zachowaniem aktywnych filtrów",
+            ]),
+        ],
+    },
+    {
         "version": "1.1.9",
         "date": "2026-05-06",
         "entries": [

@@ -921,8 +921,6 @@ class MontazTab(QWidget):
         minutes = self._parse_duty_minutes(self._duty_time_edit.text())
         visible = is_telefon or minutes > 30
         self._duty_comment_edit.setVisible(visible)
-        if not visible:
-            self._duty_comment_edit.clear()
 
     @Slot(str)
     def _on_ccid_changed(self, text: str):
@@ -1188,7 +1186,10 @@ class MontazTab(QWidget):
         if active and not self._can_truck_rb.isChecked() and not self._can_car_rb.isChecked():
             self._can_truck_rb.setChecked(True); self._on_can_truck_selected()
         elif not active:
-            self._can_truck_rb.setChecked(False); self._can_car_rb.setChecked(False)
+            for rb in (self._can_truck_rb, self._can_car_rb):
+                rb.setAutoExclusive(False)
+                rb.setChecked(False)
+                rb.setAutoExclusive(True)
             for cb in self._can_cbs:
                 if cb: cb.setChecked(False)
 

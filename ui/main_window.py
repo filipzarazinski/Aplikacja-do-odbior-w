@@ -13,10 +13,11 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QLabel, QToolTip,
     QStatusBar, QToolBar, QMessageBox, QMenu,
     QDateEdit, QFrame, QAbstractItemView, QApplication,
-    QStyledItemDelegate, QStyleOptionViewItem, QStyle
+    QStyledItemDelegate, QStyleOptionViewItem, QStyle,
+    QDialog, QListWidget, QListWidgetItem,
 )
-from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint, QUrl, QRect
-from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QDesktopServices, QPen, QPainter
+from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint, QUrl, QRect, Signal
+from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QDesktopServices, QPen, QPainter, QFont
 
 from config import APP_NAME, APP_VERSION, MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT
 from database.db_manager import DatabaseManager
@@ -188,6 +189,16 @@ class CustomTableWidget(QTableWidget):
         else:
             self._drag_blocked = False
 
+        # Kliknięcie LPM w już zaznaczony wiersz (bez Ctrl/Shift) → odznacz
+        if (event.button() == Qt.LeftButton
+                and not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier))
+                and item and self.selectionModel().isRowSelected(item.row())):
+            super().mousePressEvent(event)
+            self.clearSelection()
+            if restore_mode is not None:
+                self.setSelectionMode(restore_mode)
+            return
+
         super().mousePressEvent(event)
 
         if restore_mode is not None:
@@ -355,6 +366,287 @@ def _build_copy_json(rec: ServiceRecord) -> str:
     return json.dumps(full, ensure_ascii=False, indent=2)
 
 
+class FilterableHeaderView(QHeaderView):
+    """Nagłówek tabeli z ikoną filtra (▼) przy każdej kolumnie."""
+
+    filter_clicked     = Signal(int)   # logical col index
+    clear_all_requested = Signal()
+
+    _ZONE = 22  # px strefa filtra przy prawej krawędzi sekcji
+
+    def __init__(self, is_light: bool = False, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.setSectionsClickable(True)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._ctx_menu)
+        self._active: set[int] = set()
+        self._is_light = is_light
+
+    def set_active(self, cols: set[int]):
+        self._active = cols
+        self.viewport().update()
+
+    def _ctx_menu(self, pos: QPoint):
+        if not self._active:
+            return
+        menu = QMenu(self)
+        if self._is_light:
+            menu.setStyleSheet("""
+                QMenu { background-color: #ffffff; border: 1px solid #cbd5e1; }
+                QMenu::item { color: #0f172a; padding: 5px 20px; }
+                QMenu::item:selected { background-color: #e2e8f0; color: #0f172a; }
+            """)
+        else:
+            menu.setStyleSheet("""
+                QMenu { background-color: #1a1d23; border: 1px solid #3a4150; }
+                QMenu::item { color: #e2e8f0; padding: 5px 20px; }
+                QMenu::item:selected { background-color: #333847; color: #e2e8f0; }
+            """)
+        act = menu.addAction("✕  Wyczyść wszystkie filtry kolumn")
+        if menu.exec(self.viewport().mapToGlobal(pos)) == act:
+            self.clear_all_requested.emit()
+
+    def paintSection(self, painter: QPainter, rect: QRect, logical_index: int):
+        super().paintSection(painter, rect, logical_index)
+        if rect.width() < self._ZONE + 12:
+            return
+        painter.save()
+        painter.setClipRect(rect)
+        color = QColor("#f59e0b") if logical_index in self._active else QColor("#64748b")
+        painter.setPen(color)
+        f = QFont()
+        f.setPixelSize(9)
+        painter.setFont(f)
+        icon_rect = QRect(rect.right() - self._ZONE + 2, rect.top(), self._ZONE - 2, rect.height())
+        painter.drawText(icon_rect, Qt.AlignCenter, "▼")
+        painter.restore()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            col = self.logicalIndexAt(event.pos())
+            if col >= 0:
+                x_in = event.pos().x() - self.sectionViewportPosition(col)
+                sec_w = self.sectionSize(col)
+                if sec_w > self._ZONE + 12 and x_in >= sec_w - self._ZONE:
+                    self.filter_clicked.emit(col)
+                    event.accept()
+                    return
+        super().mousePressEvent(event)
+
+
+class _FilterItemDelegate(QStyledItemDelegate):
+    """Rysuje wiersze listy filtra z takim samym checkboxem jak kolumna 'Odebrane'."""
+
+    _CB_SIZE = 14
+    _CB_MARGIN = 8   # od lewej krawędzi
+    _TEXT_OFF = _CB_MARGIN + _CB_SIZE + 8  # gdzie zaczyna się tekst
+
+    def __init__(self, is_light: bool, parent=None):
+        super().__init__(parent)
+        self._is_light = is_light
+
+    def paint(self, painter: QPainter, option, index):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Tło
+        is_hover = bool(option.state & QStyle.State_MouseOver)
+        if self._is_light:
+            bg = QColor("#e2e8f0") if is_hover else QColor("#ffffff")
+        else:
+            bg = QColor("#22262f") if is_hover else QColor("#1a1d23")
+        painter.fillRect(option.rect, bg)
+
+        # Checkbox – identyczny jak w RowColorDelegate._paint_checkbox
+        checked = bool(index.data(Qt.UserRole + 2))
+        size = self._CB_SIZE
+        cx = option.rect.left() + self._CB_MARGIN
+        cy = option.rect.center().y() - size // 2
+        cb_rect = QRect(cx, cy, size, size)
+        border_color = QColor("#475569") if self._is_light else QColor("#64748b")
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(border_color, 0.75))
+        painter.drawRoundedRect(cb_rect, 3, 3)
+        if checked:
+            check_color = QColor("#1e293b") if self._is_light else QColor("#e2e8f0")
+            painter.setPen(QPen(check_color, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawLine(cx + 2, cy + 8, cx + 5, cy + 11)
+            painter.drawLine(cx + 5, cy + 11, cx + 11, cy + 4)
+
+        # Tekst
+        text_rect = QRect(
+            option.rect.left() + self._TEXT_OFF,
+            option.rect.top(),
+            option.rect.width() - self._TEXT_OFF - 4,
+            option.rect.height(),
+        )
+        text_color = QColor("#0f172a") if self._is_light else QColor("#e2e8f0")
+        painter.setPen(text_color)
+        painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft,
+                         index.data(Qt.UserRole + 1) or "")
+        painter.restore()
+
+    def sizeHint(self, option, _index):
+        return QSize(option.rect.width(), 26)
+
+
+class ColumnFilterPopup(QDialog):
+    """Popup filtrowania wartości kolumny (à la Excel)."""
+
+    def __init__(self, col_name: str, all_values: list,
+                 active: "set | None", is_light: bool = False, parent=None):
+        super().__init__(parent, Qt.FramelessWindowHint | Qt.Tool)
+        self.setMinimumWidth(260)
+        self.setMinimumHeight(320)
+        self.setMaximumHeight(520)
+
+        self._all_vals = sorted(set(all_values), key=lambda s: (s == "", s.lower()))
+
+        border   = "#cbd5e1" if is_light else "#3a4150"
+        bg       = "#ffffff" if is_light else "#1a1d23"
+        bg2      = "#f8fafc" if is_light else "#0f1115"
+        fg       = "#0f172a" if is_light else "#e2e8f0"
+        hdr_bg   = "#f1f5f9" if is_light else "#22262f"
+        btn_bg   = "#f1f5f9" if is_light else "#333847"
+        btn_hov  = "#e2e8f0" if is_light else "#3d4457"
+
+        self.setStyleSheet(f"""
+            ColumnFilterPopup {{
+                background-color: {bg};
+                border: 1px solid {border};
+            }}
+            QLabel#hdr {{
+                background-color: {hdr_bg};
+                color: {fg};
+                font-weight: 600;
+                font-size: 8.5pt;
+                padding: 5px 8px;
+                border-bottom: 1px solid {border};
+            }}
+            QLineEdit {{
+                background-color: {bg2}; color: {fg};
+                border: 1px solid {border}; border-radius: 4px; padding: 4px 8px;
+            }}
+            QListWidget {{ background-color: {bg}; border: none; outline: none; }}
+            QPushButton {{
+                background-color: {btn_bg}; color: {fg};
+                border: 1px solid {border}; border-radius: 4px;
+                padding: 4px 12px; min-height: 24px;
+            }}
+            QPushButton:hover {{ background-color: {btn_hov}; }}
+        """)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 8)
+        lay.setSpacing(0)
+
+        # Nagłówek z nazwą kolumny
+        hdr_lbl = QLabel(f"Filtruj: {col_name}")
+        hdr_lbl.setObjectName("hdr")
+        lay.addWidget(hdr_lbl)
+
+        inner = QWidget()
+        inner_lay = QVBoxLayout(inner)
+        inner_lay.setContentsMargins(8, 6, 8, 0)
+        inner_lay.setSpacing(6)
+        lay.addWidget(inner, 1)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Szukaj...")
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(self._filter_list)
+        inner_lay.addWidget(self._search)
+
+        self._list = QListWidget()
+        self._list.setSelectionMode(QAbstractItemView.NoSelection)
+        self._list.setMouseTracking(True)
+        self._list.setItemDelegate(_FilterItemDelegate(is_light, self._list))
+        self._list.setStyleSheet("QListWidget { outline: none; border: none; }")
+        inner_lay.addWidget(self._list, 1)
+
+        self._all_item = self._make_item("(Zaznacz wszystkie)", None, True)
+        self._list.addItem(self._all_item)
+
+        for v in self._all_vals:
+            checked = active is None or v in active
+            self._list.addItem(self._make_item(v if v else "(puste)", v, checked))
+
+        self._sync_all_item()
+        self._list.itemClicked.connect(self._on_item_clicked)
+
+        btn_lay = QHBoxLayout()
+        btn_ok = QPushButton("OK")
+        btn_cancel = QPushButton("Anuluj")
+        btn_ok.setDefault(True)
+        btn_ok.clicked.connect(self.accept)
+        btn_cancel.clicked.connect(self.reject)
+        btn_lay.addStretch()
+        btn_lay.addWidget(btn_ok)
+        btn_lay.addWidget(btn_cancel)
+        inner_lay.addLayout(btn_lay)
+
+    # ---- helpers ----
+
+    @staticmethod
+    def _make_item(display: str, value, checked: bool) -> QListWidgetItem:
+        item = QListWidgetItem()
+        item.setData(Qt.UserRole,     value)    # rzeczywista wartość filtra
+        item.setData(Qt.UserRole + 1, display)  # tekst do wyświetlenia
+        item.setData(Qt.UserRole + 2, checked)  # stan checkboxa
+        return item
+
+    def _set_checked(self, item: QListWidgetItem, checked: bool):
+        item.setData(Qt.UserRole + 2, checked)
+
+    def _is_checked(self, item: QListWidgetItem) -> bool:
+        return bool(item.data(Qt.UserRole + 2))
+
+    # ---- slots ----
+
+    def _on_item_clicked(self, item: QListWidgetItem):
+        new_state = not self._is_checked(item)
+        if item is self._all_item:
+            self._set_checked(self._all_item, new_state)
+            for i in range(1, self._list.count()):
+                it = self._list.item(i)
+                if not it.isHidden():
+                    self._set_checked(it, new_state)
+        else:
+            self._set_checked(item, new_state)
+            self._sync_all_item()
+
+    def _sync_all_item(self):
+        vis = [self._list.item(i) for i in range(1, self._list.count())
+               if not self._list.item(i).isHidden()]
+        if not vis:
+            return
+        self._set_checked(self._all_item, all(self._is_checked(it) for it in vis))
+
+    def _filter_list(self, text: str):
+        t = text.lower().strip()
+        for i in range(1, self._list.count()):
+            item = self._list.item(i)
+            display = (item.data(Qt.UserRole + 1) or "").lower()
+            item.setHidden(bool(t) and t not in display)
+        self._sync_all_item()
+
+    def paintEvent(self, event):
+        """Rysuje obramowanie okna (zastępuje systemowe, usunięte przez FramelessWindowHint)."""
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setPen(QPen(self.palette().mid().color(), 1))
+        p.drawRect(self.rect().adjusted(0, 0, -1, -1))
+
+    def selected_values(self) -> "set | None":
+        """None = brak filtra (wszystkie zaznaczone)."""
+        selected = {
+            self._list.item(i).data(Qt.UserRole)
+            for i in range(1, self._list.count())
+            if self._is_checked(self._list.item(i))
+        }
+        return None if len(selected) == len(self._all_vals) else selected
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self):
@@ -367,6 +659,9 @@ class MainWindow(QMainWindow):
         self._active_columns: list[tuple[str, str]] = []
         self._json_col_index: int = -1
         self._loading: bool = False
+        self._col_filters: dict = {}   # attr -> set[str]
+        self._all_records: list = []
+        self._pre_col_records: list = []  # rekordy po filtrze dat/wyszukiwarki, przed col filtrami
         self._flash_timers: list = []
         self._open_forms: list = []
         self._is_light = self._db.get_setting("theme_mode", "dark") == "light"
@@ -696,10 +991,13 @@ class MainWindow(QMainWindow):
         table.setShowGrid(True)
         table.setContextMenuPolicy(Qt.CustomContextMenu)
 
-        hdr = table.horizontalHeader()
+        hdr = FilterableHeaderView(self._is_light, table)
+        table.setHorizontalHeader(hdr)
         hdr.setSectionResizeMode(QHeaderView.Interactive)
         hdr.setStretchLastSection(True)
         hdr.setMinimumSectionSize(30)
+        hdr.filter_clicked.connect(self._on_column_filter_clicked)
+        hdr.clear_all_requested.connect(self._on_clear_col_filters)
 
         self._rebuild_table_columns(table)
         return table
@@ -723,6 +1021,13 @@ class MainWindow(QMainWindow):
 
         table.setColumnCount(len(self._active_columns))
         table.setHorizontalHeaderLabels([c[0] for c in self._active_columns])
+
+        # Usuń filtry kolumn, które zostały ukryte
+        if self._col_filters:
+            vis = {a for _, a in self._active_columns}
+            self._col_filters = {k: v for k, v in self._col_filters.items() if k in vis}
+        if hasattr(self, '_table') and table is self._table:
+            self._update_header_filter_indicators()
 
         if self._is_light:
             table.setStyleSheet("""
@@ -859,7 +1164,7 @@ class MainWindow(QMainWindow):
         self._act_new.triggered.connect(self._on_new)
         self._act_edit.triggered.connect(self._on_edit)
         self._act_delete.triggered.connect(self._on_delete)
-        self._act_refresh.triggered.connect(self.load_records)
+        self._act_refresh.triggered.connect(self._on_filter)
         self._act_settings.triggered.connect(self._on_open_settings)
 
         self._btn_duplicate_row.clicked.connect(self._on_duplicate_row)
@@ -888,6 +1193,8 @@ class MainWindow(QMainWindow):
             logger.error(f"Błąd pobierania: {exc}", exc_info=True)
             QMessageBox.warning(self, "Błąd", f"Nie można pobrać danych:\n{exc}")
             return
+
+        self._all_records = all_records
 
         if filters:
             filtered_records = []
@@ -970,6 +1277,18 @@ class MainWindow(QMainWindow):
         else:
             self._records = all_records
 
+        self._pre_col_records = self._records  # snapshot przed col filtrami
+
+        # Filtry kolumnowe (po wyszukiwarce i datach)
+        if self._col_filters:
+            vis_attrs = {a for _, a in self._active_columns}
+            active_cf = {k: v for k, v in self._col_filters.items() if k in vis_attrs}
+            if active_cf:
+                self._records = [
+                    r for r in self._records
+                    if all(str(_get_cell_value(r, a)) in vs for a, vs in active_cf.items())
+                ]
+
         self._loading = True
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
@@ -1022,6 +1341,7 @@ class MainWindow(QMainWindow):
         self._loading = False
         self._selected_record_id = None
         self._update_buttons()
+        self._update_header_filter_indicators()
         n = len(self._records)
         self._lbl_count.setText(f"Rekordów: {n}")
         self._status_bar.showMessage(f"Załadowano {n} rekordów.", 3000)
@@ -1261,7 +1581,18 @@ class MainWindow(QMainWindow):
                 act_fleet.triggered.connect(_open_fleet)
             menu.addSeparator()
 
+        act_ref = menu.addAction("⟳  Odśwież")
+        act_ref.triggered.connect(self._on_filter)
+        if len(selected_rows) == 1:
+            act_edit = menu.addAction("✎  Edytuj")
+            act_edit.triggered.connect(self._on_edit)
+            act_dup = menu.addAction("⧉  Duplikuj")
+            act_dup.triggered.connect(self._on_duplicate_row)
+        act_del = menu.addAction(f"✕  Usuń ({len(selected_rows)})" if len(selected_rows) > 1 else "✕  Usuń")
+        act_del.triggered.connect(self._on_delete)
+
         if self._db.get_setting("show_duty_section", "1") == "1":
+            menu.addSeparator()
             act = menu.addAction(f"📋  Kopiuj do dyżurów ({len(selected_rows)} wierszy)")
             act.triggered.connect(lambda: self._copy_duty_info(selected_rows))
 
@@ -1415,7 +1746,7 @@ class MainWindow(QMainWindow):
             btn = QPushButton(name)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(self._btn_q_style)
-            btn.clicked.connect(lambda checked=False, q=query: self._on_q_custom(q))
+            btn.clicked.connect(lambda _=False, q=query: self._on_q_custom(q))
             self._q_lay.insertWidget(self._q_lay.count() - 1, btn)
             self._custom_filter_btns.append(btn)
 
@@ -1562,6 +1893,59 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage(f"Usunięto {count} rekord(ów).", 3000)
 
     @Slot()
+    # ------------------------------------------------- Filtry kolumn (Excel)
+
+    @Slot(int)
+    def _on_column_filter_clicked(self, col_index: int):
+        if col_index < 0 or col_index >= len(self._active_columns):
+            return
+        col_name, attr = self._active_columns[col_index]
+
+        # Wartości do popupu: rekordy po filtrze dat/wyszukiwarki,
+        # ale z pominięciem filtra tej konkretnej kolumny (żeby można go było rozszerzyć)
+        other_cf = {k: v for k, v in self._col_filters.items() if k != attr}
+        if other_cf:
+            source = [r for r in self._pre_col_records
+                      if all(str(_get_cell_value(r, a)) in vs for a, vs in other_cf.items())]
+        else:
+            source = self._pre_col_records
+        all_vals = [str(_get_cell_value(r, attr)) for r in source]
+
+        active = self._col_filters.get(attr)
+
+        hdr = self._table.horizontalHeader()
+        popup = ColumnFilterPopup(col_name, all_vals, active, self._is_light, self)
+
+        sec_x = hdr.sectionViewportPosition(col_index)
+        global_pos = self._table.mapToGlobal(QPoint(sec_x, hdr.height()))
+        screen = QApplication.primaryScreen().geometry()
+        px = min(global_pos.x(), screen.right() - popup.minimumWidth() - 10)
+        py = min(global_pos.y(), screen.bottom() - popup.minimumHeight() - 10)
+        popup.move(px, py)
+
+        if popup.exec() == QDialog.Accepted:
+            result = popup.selected_values()
+            if result is None:
+                self._col_filters.pop(attr, None)
+            else:
+                self._col_filters[attr] = result
+            self._on_filter()
+
+    @Slot()
+    def _on_clear_col_filters(self):
+        self._col_filters.clear()
+        self._on_filter()
+
+    def _update_header_filter_indicators(self):
+        hdr = self._table.horizontalHeader()
+        if not isinstance(hdr, FilterableHeaderView):
+            return
+        active_cols = {
+            i for i, (_, attr) in enumerate(self._active_columns)
+            if attr in self._col_filters
+        }
+        hdr.set_active(active_cols)
+
     def _on_filter(self):
         f: dict = {}
         if s := self._filter_search.text().strip().lower():

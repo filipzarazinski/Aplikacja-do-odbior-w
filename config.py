@@ -31,7 +31,7 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Metadane aplikacji ---
 APP_NAME = "Odbiory - System Zarządzania Montażami"
-APP_VERSION = "1.1.9"
+APP_VERSION = "1.2.0"
 APP_AUTHOR = "filipzarazinski"
 
 # --- GitHub / Aktualizacje ---
@@ -75,7 +75,7 @@ VEHICLE_TYPES = ["Ciężarowy", "Osobowy", "Maszyna", "Naczepa"]
 D8_OPTIONS = ["Tachoreader", "FMB640/FMC650"]
 
 # Marki tachografu – z formEdit.bas i Submit.bas
-TACHO_BRANDS_TACHOREADER  = ["Siemens", "Stonerige"]
+TACHO_BRANDS_TACHOREADER  = ["Siemens", "Stoneridge"]
 TACHO_BRANDS_FMB640       = ["Siemens", "Stoneridge", "Inne"]
 
 # Funkcje DIN wymagające pola S/N (z logiki ComboBox_Change w VBA)

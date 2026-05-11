@@ -74,7 +74,7 @@ class ServiceForm(QDialog):
             identifier = self._record.license_plate if self._record.license_plate else f"ID {self._record.id}"
             title = f"Edycja – {identifier}"
         else:
-            title = "Nowy montaż"
+            title = "Nowy wpis"
         self.setWindowTitle(title)
         self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
         self.setMinimumSize(FORM_WIDTH, FORM_HEIGHT)
@@ -93,7 +93,7 @@ class ServiceForm(QDialog):
         root.addWidget(self._tabs, 1)
 
         self._tab_montaz = MontazTab(record=self._record, edit_mode=self._edit_mode)
-        self._tabs.addTab(self._tab_montaz, f"  Montaże   |   {title}  ")
+        self._tabs.addTab(self._tab_montaz, f"  {title}  ")
 
         # Stopka
         footer = QWidget(self)
