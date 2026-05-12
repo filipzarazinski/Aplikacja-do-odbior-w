@@ -1900,6 +1900,13 @@ class SettingsWindow(QDialog):
 
         list_w = QListWidget()
         list_w.setSelectionMode(QAbstractItemView.NoSelection)
+        list_w.setStyleSheet(
+            "QListWidget { font-size: 9pt; }"
+            "QListWidget::item { padding: 4px 6px; }"
+            "QListWidget::indicator { width: 16px; height: 16px; background: transparent; border: none; }"
+            "QListWidget::indicator:checked { background: transparent; border: none; }"
+        )
+        list_w.setItemDelegate(_ColCheckDelegate(self._is_light, list_w))
 
         val = self._db.get_setting(key, self._COLOR_DEFAULTS.get(key, ""))
         selected_attrs = set(x.strip() for x in val.split(",") if x.strip())
@@ -2137,7 +2144,7 @@ class SettingsWindow(QDialog):
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(0)
 
-        for i, entry in enumerate(CHANGELOG[:5]):
+        for i, entry in enumerate(CHANGELOG):
             if i > 0:
                 sep = QWidget(content)
                 sep.setFixedHeight(1)

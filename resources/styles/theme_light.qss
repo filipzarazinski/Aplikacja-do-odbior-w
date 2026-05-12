@@ -259,3 +259,42 @@ QMenu::separator {
     background: #e2e8f0;
     margin: 3px 8px;
 }
+
+/* --- Kalendarz --- */
+QCalendarWidget {
+    background-color: #ffffff;
+}
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: #f1f5f9;
+    padding: 4px;
+}
+QCalendarWidget QToolButton {
+    background-color: #f1f5f9;
+    color: #0f172a;
+    font-weight: 600;
+    border-radius: 3px;
+    padding: 4px 8px;
+}
+QCalendarWidget QToolButton:hover {
+    background-color: #e2e8f0;
+    border: 1px solid #cbd5e1;
+}
+QCalendarWidget QMenu {
+    background-color: #ffffff;
+    color: #0f172a;
+}
+QCalendarWidget QAbstractItemView:enabled {
+    background-color: #ffffff;
+    color: #0f172a;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
+    alternate-background-color: #f8fafc;
+}
+QCalendarWidget QAbstractItemView::item:hover {
+    background-color: #dbeafe;
+    color: #0f172a;
+}
+QCalendarWidget QAbstractItemView::item:selected {
+    background-color: #3b82f6;
+    color: #ffffff;
+}

@@ -421,13 +421,16 @@ class FilterableHeaderView(QHeaderView):
         painter.drawText(icon_rect, Qt.AlignCenter, "▼")
         painter.restore()
 
+    _RESIZE_MARGIN = 6  # px przy prawej krawędzi = uchwyt resizowania, nie filtr
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             col = self.logicalIndexAt(event.pos())
             if col >= 0:
                 x_in = event.pos().x() - self.sectionViewportPosition(col)
                 sec_w = self.sectionSize(col)
-                if sec_w > self._ZONE + 12 and x_in >= sec_w - self._ZONE:
+                in_resize_zone = x_in >= sec_w - self._RESIZE_MARGIN
+                if not in_resize_zone and sec_w > self._ZONE + 12 and x_in >= sec_w - self._ZONE:
                     self.filter_clicked.emit(col)
                     event.accept()
                     return
@@ -1557,6 +1560,20 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
+        if self._is_light:
+            menu.setStyleSheet("""
+                QMenu { background-color: #ffffff; border: 1px solid #cbd5e1; }
+                QMenu::item { color: #0f172a; padding: 5px 20px; }
+                QMenu::item:selected { background-color: #e2e8f0; color: #0f172a; }
+                QMenu::separator { height: 1px; background: #e2e8f0; margin: 3px 8px; }
+            """)
+        else:
+            menu.setStyleSheet("""
+                QMenu { background-color: #1a1d23; border: 1px solid #3a4150; }
+                QMenu::item { color: #e2e8f0; padding: 5px 20px; }
+                QMenu::item:selected { background-color: #333847; color: #e2e8f0; }
+                QMenu::separator { height: 1px; background: #3a4150; margin: 3px 8px; }
+            """)
 
         if len(selected_rows) == 1:
             rec_id = self._get_record_id_for_row(selected_rows[0])
@@ -1918,9 +1935,10 @@ class MainWindow(QMainWindow):
 
         sec_x = hdr.sectionViewportPosition(col_index)
         global_pos = self._table.mapToGlobal(QPoint(sec_x, hdr.height()))
-        screen = QApplication.primaryScreen().geometry()
-        px = min(global_pos.x(), screen.right() - popup.minimumWidth() - 10)
-        py = min(global_pos.y(), screen.bottom() - popup.minimumHeight() - 10)
+        screen = QApplication.screenAt(global_pos) or QApplication.primaryScreen()
+        geom = screen.availableGeometry()
+        px = min(global_pos.x(), geom.right() - popup.minimumWidth() - 10)
+        py = min(global_pos.y(), geom.bottom() - popup.minimumHeight() - 10)
         popup.move(px, py)
 
         if popup.exec() == QDialog.Accepted:
