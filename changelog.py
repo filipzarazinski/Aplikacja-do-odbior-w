@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.3",
+        "date": "2026-07-31",
+        "entries": [
+            ("Inne", [
+                "Drobne poprawki",
+            ]),
+        ],
+    },
+    {
         "version": "1.2.2",
         "date": "2026-07-31",
         "entries": [

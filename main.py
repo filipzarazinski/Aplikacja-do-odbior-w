@@ -195,16 +195,18 @@ def main() -> int:
     _instance_server.listen(_INSTANCE_KEY)
     app.setFont(QFont("Segoe UI", 9))
 
+    # Wymuszenie własnej tożsamości (AppUserModelID) na pasku zadań w systemie Windows.
+    # Musi się wykonać zawsze i niezależnie od ikony, inaczej Windows nie łączy
+    # nowo odpalonego procesu z wcześniej przypiętą ikonką na pasku zadań.
+    if sys.platform == "win32":
+        import ctypes
+        myappid = "filipzarazinski.Odbiory.app"
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
     # Ustawienie ikony aplikacji
     logo_path = BASE_DIR / "logo.png"
     if logo_path.exists():
         app.setWindowIcon(QIcon(str(logo_path)))
-        
-        # Wymuszenie własnej ikony na pasku zadań w systemie Windows
-        if sys.platform == "win32":
-            import ctypes
-            myappid = "filipzarazinski.Odbiory.app"
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
     # 1. Inicjalizacja bazy PRZED załadowaniem stylów
     try:

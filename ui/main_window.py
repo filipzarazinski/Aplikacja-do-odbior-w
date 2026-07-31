@@ -1491,12 +1491,7 @@ class MainWindow(QMainWindow):
         attr = self._active_columns[col][1] if col < len(self._active_columns) else ""
 
         if attr == "_odebrane":
-            item = self._table.item(row, col)
-            if item and (item.flags() & Qt.ItemIsUserCheckable):
-                new_state = Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked
-                item.setCheckState(new_state)
-            self._selected_record_id = self._get_record_id_for_row(row)
-            self._update_buttons()
+            self._toggle_odebrane(row, col)
             return
 
         if attr in _COPY_ATTRS:
@@ -1521,14 +1516,29 @@ class MainWindow(QMainWindow):
         self._selected_record_id = self._get_record_id_for_row(row)
         self._update_buttons()
 
+    def _toggle_odebrane(self, row: int, col: int):
+        item = self._table.item(row, col)
+        if item and (item.flags() & Qt.ItemIsUserCheckable):
+            new_state = Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked
+            item.setCheckState(new_state)
+        self._selected_record_id = self._get_record_id_for_row(row)
+        self._update_buttons()
+
     def _on_double_clicked(self, index):
         row = index.row() if hasattr(index, "row") else self._table.currentRow()
         col = index.column() if hasattr(index, "column") else -1
-        
+
         col_attr = self._active_columns[col][1] if col < len(self._active_columns) else ""
-        
-        # Ignorujemy dwuklik na kopiowanie ORAZ na checkboxa "odebrane"
-        if col_attr in _COPY_ATTRS or col_attr == "_odebrane":
+
+        # Drugi z dwóch szybkich kliknięć na checkboxa "odebrane" Qt rozpoznaje jako
+        # dwuklik i NIE emituje dla niego zwykłego "cellClicked" - musimy go tu obsłużyć
+        # ręcznie, inaczej szybkie klikanie co drugi klik nie robiłoby nic.
+        if col_attr == "_odebrane":
+            self._toggle_odebrane(row, col)
+            return
+
+        # Ignorujemy dwuklik na kopiowanie
+        if col_attr in _COPY_ATTRS:
             return
             
         rec_id = self._get_record_id_for_row(row)

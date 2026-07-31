@@ -51,6 +51,7 @@ class ServiceForm(QDialog):
         self._connect_signals()
         if self._edit_mode:
             self._tab_montaz.load_from_record(self._record)
+        self._on_fleet_changed(self._tab_montaz._fleet_name_edit.text())
         self._original_record = copy.deepcopy(self._record)
         self._tab_montaz.collect_to_record(self._original_record)
 
@@ -114,6 +115,9 @@ class ServiceForm(QDialog):
         btn_hover = "#f8fafc" if is_light else "#333847"
         btn_hover_fg = "#2563eb" if is_light else "#e2e8f0"
         btn_pressed = "#e2e8f0" if is_light else "#3a4150"
+        btn_disabled_bg = "#f1f5f9" if is_light else "#1e2229"
+        btn_disabled_fg = "#94a3b8" if is_light else "#3a4150"
+        btn_disabled_border = "#cbd5e1" if is_light else "#252930"
 
         footer.setObjectName("serviceFooter")
         footer.setStyleSheet(
@@ -125,6 +129,7 @@ class ServiceForm(QDialog):
             f"border-radius:4px;font-size:9pt;font-weight:500;}}"
             f"QPushButton:hover{{background:{btn_hover};color:{btn_hover_fg};border-color:#64748b;}}"
             f"QPushButton:pressed{{background:{btn_pressed};}}"
+            f"QPushButton:disabled{{background:{btn_disabled_bg};color:{btn_disabled_fg};border-color:{btn_disabled_border};}}"
         )
 
         f_lay = QHBoxLayout(footer)
