@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QDialog, QFormLayout,
-    QLineEdit, QDialogButtonBox, QFileDialog,
+    QLineEdit, QComboBox, QDialogButtonBox, QFileDialog,
     QLabel, QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
@@ -24,20 +24,31 @@ logger = logging.getLogger(__name__)
 class _RowDialog(QDialog):
     """Prosty dialog do dodawania/edytowania wiersza słownika."""
 
-    def __init__(self, labels: list[str], values: list[str] = None, parent=None):
+    def __init__(self, labels: list[str], values: list[str] = None, parent=None,
+                 combo_fields: dict[int, list[str]] = None):
         super().__init__(parent)
         self.setWindowTitle("Edycja rekordu")
         self.setModal(True)
         self.setMinimumWidth(340)
 
+        combo_fields = combo_fields or {}
         layout = QVBoxLayout(self)
         form = QFormLayout()
         form.setSpacing(8)
-        self._edits: list[QLineEdit] = []
+        self._edits: list[QLineEdit | QComboBox] = []
 
         for i, label in enumerate(labels):
-            edit = QLineEdit()
-            edit.setText(values[i] if values and i < len(values) else "")
+            current = values[i] if values and i < len(values) else ""
+            options = combo_fields.get(i)
+            if options is not None:
+                edit = QComboBox()
+                edit.addItems(options)
+                if current and current not in options:
+                    edit.addItem(current)
+                edit.setCurrentText(current)
+            else:
+                edit = QLineEdit()
+                edit.setText(current)
             form.addRow(label + ":", edit)
             self._edits.append(edit)
 
@@ -49,7 +60,10 @@ class _RowDialog(QDialog):
         layout.addWidget(btns)
 
     def get_values(self) -> list[str]:
-        return [e.text().strip() for e in self._edits]
+        return [
+            (e.currentText() if isinstance(e, QComboBox) else e.text()).strip()
+            for e in self._edits
+        ]
 
 
 class DictTab(QWidget):
@@ -91,6 +105,7 @@ class DictTab(QWidget):
         lazy: bool = False,
         show_import: bool = True,
         manual_load: bool = False,
+        combo_fields: dict[int, list[str]] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -101,6 +116,7 @@ class DictTab(QWidget):
         self._excel_sheet = excel_sheet
         self._excel_parser = excel_parser
         self._add_labels = add_labels or headers
+        self._combo_fields = combo_fields or {}
         self._commit = commit_fn or (lambda: None)
         self._show_import = show_import
         self._manual_load = manual_load
@@ -264,7 +280,7 @@ class DictTab(QWidget):
     # ---------------------------------------------------------------- Slots
 
     def _on_add(self):
-        dlg = _RowDialog(self._add_labels, parent=self)
+        dlg = _RowDialog(self._add_labels, parent=self, combo_fields=self._combo_fields)
         if dlg.exec():
             vals = dlg.get_values()
             if any(vals):
@@ -286,7 +302,7 @@ class DictTab(QWidget):
             self._table.item(row, c).text()
             for c in range(self._table.columnCount())
         ]
-        dlg = _RowDialog(self._add_labels, current, parent=self)
+        dlg = _RowDialog(self._add_labels, current, parent=self, combo_fields=self._combo_fields)
         if dlg.exec():
             vals = dlg.get_values()
             if any(vals):

@@ -172,9 +172,11 @@ def main() -> int:
     except Exception:
         pass
 
-    # Windows DPI scaling
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # Zawsze uruchamiaj w 100% — ignoruj skalowanie systemu Windows
+    import os
+    os.environ["QT_SCALE_FACTOR"] = "1"
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
@@ -201,7 +203,7 @@ def main() -> int:
         # Wymuszenie własnej ikony na pasku zadań w systemie Windows
         if sys.platform == "win32":
             import ctypes
-            myappid = f"filipzarazinski.Odbiory.app.{APP_VERSION}"
+            myappid = "filipzarazinski.Odbiory.app"
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
     # 1. Inicjalizacja bazy PRZED załadowaniem stylów

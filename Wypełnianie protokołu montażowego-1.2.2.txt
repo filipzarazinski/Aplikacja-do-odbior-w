@@ -1,0 +1,1091 @@
+// ==UserScript==
+// @name          Wypełnianie protokołu montażowego
+// @version       1.2.2
+// @description   Automatyczne wypełnianie protokołów - Sprawdzanie duplikatów urządzeń + nie nadpisuj już wypełnionych pól + wypełniaj puste wiersze DIN zamiast dodawać nowe// @author        FZA
+// @match         http://*/api/installation*
+// @grant         none
+// @include       */api/installation*
+// @exclude       */api/installation/main/index/*
+// @updateURL     https://gist.githubusercontent.com/filipzarazinski/f5c20e3c2590d8cdbb10a2deec958ad5/raw/wypelnianie_protokolu_montazowego_apka.user.js
+// @downloadURL   https://gist.githubusercontent.com/filipzarazinski/f5c20e3c2590d8cdbb10a2deec958ad5/raw/wypelnianie_protokolu_montazowego_apka.user.js
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const _d = s => atob(s);
+    const _n = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const _m = (co, ...enc) => enc.some(e => _n(co).includes(_d(e)));
+
+    // --- BEZPIECZNE SPRAWDZANIE NAGŁÓWKA ---
+    const headerCaption = document.getElementById('bottom_header').children[1].children[0].innerText;
+    if(headerCaption.includes("Protokół montażowy") && document.getElementById("take-trigger")) {
+
+        const myTextbox = document.createElement("div");
+        myTextbox.innerHTML = `
+            <div style="width:100%">
+                <input
+                    type="text"
+                    id="myTextbox"
+                    style="width:100%"
+                >
+                <button
+                    style="border:1px solid #28bea9;cursor:pointer;"
+                    id="newButton"
+                    onmouseover="this.style.opacity=0.8"
+                    onmouseout="this.style.opacity=1">
+                    Wypełnij protokół
+                </button>
+            </div>`;
+
+        document.getElementById("header").appendChild(myTextbox);
+        document.getElementById("newButton").addEventListener('click', fillProtocol);
+
+        myTextbox.addEventListener('input', e => {
+            if(e.target.value.startsWith('"')) e.target.value = e.target.value.replace(/""/g, '"').slice(1, -1);
+        });
+
+        // ==========================================
+        // GŁÓWNA FUNKCJA ORKIESTRUJĄCA
+        // ==========================================
+        async function fillProtocol() {
+            $loader.show();
+            try {
+                const userJSON = JSON.parse(document.getElementById("myTextbox").value);
+
+                if (userJSON.monter && userJSON.monter.includes(' - ')) {
+                    userJSON.monter = userJSON.monter.split(' - ').pop().trim();
+                }
+
+                const protocolType = userJSON.typ || "";
+
+                await handleCompanyAndType(userJSON, protocolType);
+                handleVehicle(userJSON, protocolType);
+                await handleRejestrator(userJSON);
+                handleCAN(userJSON);
+                handleD8AndTacho(userJSON);
+                await handleDINs(userJSON);
+                await handleTablet(userJSON);
+                await handleOtherDevices(userJSON);
+                await handleSondy(userJSON);
+                handleFinalInfo(userJSON);
+
+                // --- SIM na sam koniec, by nie przerywać niczego wcześniej ---
+                if (userJSON.sim) {
+                    const pType = protocolType.trim().toLowerCase();
+                    const setSim = () => {
+                        const $simInput = $('input[name="nr_karty_sim"]');
+                        if($simInput.length) {
+                            $simInput.val(userJSON.sim).trigger('input').trigger('change').removeClass('mValidatorError');
+                        }
+                    };
+
+                    setSim();
+
+                    if (pType.includes("upgrade") || pType.includes("przekładka") || pType.includes("przekladka")) {
+                        setTimeout(setSim, 1000);
+                        setTimeout(setSim, 2500);
+                        setTimeout(setSim, 4500);
+                    }
+                }
+
+                // --- Wybór pojazdu dla upgrade/przekładki NA SAMYM KOŃCU ---
+                await handleVehicleSelection(userJSON, protocolType);
+
+            } catch (error) {
+                alert("Błąd: " + error.message);
+                console.error(error);
+            } finally {
+                $loader.hide();
+            }
+        }
+
+        // ==========================================
+        // MODUŁY LOGICZNE (KLOCKI)
+        // ==========================================
+
+        // ==========================================
+        // POMOCNIK: czy pole select2 jest puste/niewybrane?
+        // ==========================================
+
+        function isSelect2Empty(selector) {
+            try {
+                const data = $(selector).select2('data');
+                if (!data) return true;
+                const text = (data.text || data.id || "").trim();
+                return text === "" || text === "-- Wybierz --" || text.toLowerCase().includes("wybierz");
+            } catch(e) {
+                return true;
+            }
+        }
+
+        async function handleCompanyAndType(userJSON, protocolType) {
+
+            const pType = protocolType.trim().toLowerCase();
+
+            if (pType !== "") {
+                // Kategoria – ustaw tylko jeśli pusta
+                const katSelector = $('#kategoria_id').length ? '#kategoria_id' : '#s2id_kategoria_id';
+                if (isSelect2Empty(katSelector)) {
+                    const katVal = (userJSON.monter === "Monter klienta" || !userJSON.monter) ? 2 : 1;
+                    $(katSelector).select2('val', katVal).trigger('change');
+                }
+
+                // Typ montażu – ustaw tylko jeśli pusty
+                if (isSelect2Empty('#type_id')) {
+                    if(pType.includes("montaż") || pType.includes("montaz")) {
+                        isInvoiceActiveOnAnotherVehicle(userJSON.id);
+                        $("#type_id").select2('val', 1).trigger('change');
+                    } else if(pType.includes("upgrade")) {
+                        $("#type_id").select2('val', 2).trigger('change');
+                    } else if(pType.includes("przekładka") || pType.includes("przekladka")) {
+                        $("#type_id").select2('val', 3).trigger('change');
+                    }
+                }
+
+                // Oddaj wątek przeglądarce żeby zdążyła wykonać synchroniczne handlery change
+                await new Promise(r => setTimeout(r, 0));
+            }
+
+            // Czytamy AKTUALNIE wybrany typ z protokołu (po ewentualnym ustawieniu powyżej)
+            const actualTypeId = parseInt($("#type_id").select2('val')) || 0;
+
+            // Firma – zachowaj istniejącą logikę (już sprawdza czy pusta)
+            const firmaWProtokole = $('#firma1_id').select2('data') ? $('#firma1_id').select2('data').text : "";
+            if (firmaWProtokole === "" || firmaWProtokole === "-- Wybierz --" || firmaWProtokole.includes("Wybierz")) {
+                if(!setSelect2ByText('#firma1_id', userJSON.firma)) alert(`Nie znaleziono firmy ${userJSON.firma}`);
+            } else if(firmaWProtokole !== userJSON.firma) {
+                alert(`Firma w protokole "${firmaWProtokole}" różni się od podanej: "${userJSON.firma}"`);
+            }
+
+            // Czekaj aż grupa pojazdów zostanie odblokowana po zmianie firmy (tylko jeśli jest disabled)
+            if ($('#s2id_grupa_pojazdow_id').hasClass('select2-container-disabled')) {
+                for (let i = 0; i < 60; i++) {
+                    if (!$('#s2id_grupa_pojazdow_id').hasClass('select2-container-disabled')) break;
+                    await new Promise(r => setTimeout(r, 50));
+                }
+            }
+
+            // Grupa pojazdów – ustaw tylko jeśli pusta, opcje są zawsze w DOM
+            if (isSelect2Empty('#grupa_pojazdow_id')) {
+                if (!setSelect2ByText('#grupa_pojazdow_id', 'Wszystkie', true)) {
+                    setSelect2ByText('#grupa_pojazdow_id', 'Wszystkie', false);
+                }
+            }
+        }
+
+        // Wywoływane NA KOŃCU – po załadowaniu całego protokołu, gdy listy są gotowe
+        async function handleVehicleSelection(userJSON, protocolType) {
+            const actualTypeId = parseInt($("#type_id").select2('val')) || 0;
+            const actualIsUpgrade    = actualTypeId === 2;
+            const actualIsPrzekladka = actualTypeId === 3;
+
+            if (actualIsPrzekladka) {
+                let rejPrzekladka = "";
+                if (userJSON.przekladkaZ && userJSON.przekladkaZ.trim() !== "") {
+                    rejPrzekladka = userJSON.przekladkaZ.trim();
+                } else if (protocolType.includes("Przekładka z ")) {
+                    rejPrzekladka = protocolType.split("Przekładka z ")[1].trim();
+                }
+
+                if (rejPrzekladka && isSelect2Empty('#old_reg_number')) {
+                    if (!setSelect2ByText('#old_reg_number', rejPrzekladka, true)) {
+                        setSelect2ByText('#old_reg_number', rejPrzekladka, false);
+                    }
+                }
+            }
+
+            if (actualIsUpgrade) {
+                // Czekaj aż pole będzie widoczne i dostępne (max 5s)
+                for (let i = 0; i < 100; i++) {
+                    const $s2 = $('#s2id_reg_number_select');
+                    const isVisible = $s2.is(':visible');
+                    const isEnabled = !$s2.hasClass('select2-container-disabled');
+                    if (isVisible && isEnabled) break;
+                    await new Promise(r => setTimeout(r, 50));
+                }
+
+                // Czekaj aż wszystkie AJAXe (wywołane przez zmianę firmy/grupy) się skończą
+                // Pole rejestracji jest resetowane przez te requesty - musimy poczekać aż ucichną
+                let quietTime = 0;
+                for (let i = 0; i < 200; i++) { // max 10s
+                    await new Promise(r => setTimeout(r, 50));
+                    if (typeof $.active !== 'undefined' && $.active === 0) {
+                        quietTime += 50;
+                        if (quietTime >= 600) break; // 600ms ciszy = wszystko załadowane
+                    } else {
+                        quietTime = 0;
+                    }
+                }
+
+                const targetReg = userJSON.nrRejestracyjny;
+                const normalize = s => (s || "").trim().replace(/\s/g, '').toLowerCase();
+
+                const trySelect = async () => {
+                    // 1) Spróbuj klasycznie (jeśli <option> już są w DOM)
+                    let ok = setSelect2ByText('#reg_number_select', targetReg, true);
+                    if (!ok) ok = setSelect2ByText('#reg_number_select', targetReg, false);
+                    // 2) Fallback - select2 AJAX
+                    if (!ok) ok = await setSelect2Ajax('#reg_number_select', targetReg);
+                    return ok;
+                };
+
+                const isSelected = () => {
+                    try {
+                        const data = $('#reg_number_select').select2('data');
+                        if (!data) return false;
+                        const text = (data.text || data.id || "");
+                        return normalize(text).includes(normalize(targetReg));
+                    } catch(e) { return false; }
+                };
+
+                // Max 5 prób - jeśli pole zostanie zresetowane przez kolejny AJAX, wybierz ponownie
+                for (let attempt = 0; attempt < 5; attempt++) {
+                    await trySelect();
+                    // Czekaj i sprawdź czy wybór "przetrwał"
+                    await new Promise(r => setTimeout(r, 600));
+                    if (isSelected()) break;
+                    // Wybór zniknął - poczekaj chwilę dłużej i spróbuj znowu
+                    await new Promise(r => setTimeout(r, 400));
+                }
+            }
+        }
+
+        function handleVehicle(userJSON, protocolType) {
+            // Bazujemy na tym co faktycznie jest w protokole, nie na JSONie
+            const actualTypeId = parseInt($("#type_id").select2('val')) || 0;
+            const actualIsUpgrade = actualTypeId === 2;
+
+            if (!actualIsUpgrade && userJSON.nrRejestracyjny) {
+                const currentRej = $("#nr_rejestracyjny").val() || "";
+                const currentRejLower = currentRej.trim().toLowerCase();
+
+                // Pobierz markę z protokołu (select2) żeby sprawdzić czy nie pojawia się w polu rejestracji
+                let markaWProtokole = "";
+                try {
+                    const isTrailer = $("#vehicle_type_id").select2('val') == 4;
+                    const markaData = $(isTrailer ? '#trailer_brand_id' : '#marka_id').select2('data');
+                    if (markaData && markaData.text) markaWProtokole = markaData.text.trim().toLowerCase();
+                } catch(e) {}
+
+                const rejZawieraMarke = markaWProtokole !== "" &&
+                                        markaWProtokole !== "-- wybierz --" &&
+                                        !markaWProtokole.includes("wybierz") &&
+                                        currentRejLower.includes(markaWProtokole);
+
+                if (currentRej.trim() === "" || currentRej.trim() === "." || currentRejLower === "inny" || currentRejLower === "ciężarówka" || currentRejLower === "ciezarowka" || rejZawieraMarke) {
+                    $("#nr_rejestracyjny").val(userJSON.nrRejestracyjny);
+                } else if (currentRej.trim().toUpperCase() !== userJSON.nrRejestracyjny.trim().toUpperCase()) {
+                    if (confirm(`Nr rejestracyjny w protokole to "${currentRej.trim()}". Nadpisać wartością z JSON: "${userJSON.nrRejestracyjny}"?`)) {
+                        $("#nr_rejestracyjny").val(userJSON.nrRejestracyjny);
+                    }
+                }
+            }
+
+            const currentBoczny = $("#nr_boczny_pojazdu").val() || "";
+            if (currentBoczny.trim() === ".") $("#nr_boczny_pojazdu").val('');
+            if (userJSON.nrBoczny && (currentBoczny.trim() === "" || currentBoczny.trim() === ".")) {
+                $("#nr_boczny_pojazdu").val(userJSON.nrBoczny);
+            }
+
+            // Przy upgrade nie ruszamy rodzaju/marki/modelu - dane załadują się automatycznie po wyborze pojazdu
+            if (!actualIsUpgrade) {
+                // Dla Tauron/PGE uzupełniamy tylko jeśli puste, dla pozostałych flot nadpisujemy zawsze
+                const flota = userJSON.flota || "";
+                const czyUzupelniacTylkoJesliPuste = _m(flota, "VEFVUk9O", "UEdF");
+
+                // Rodzaj pojazdu
+                if (!czyUzupelniacTylkoJesliPuste || isSelect2Empty('#vehicle_type_id')) {
+                    let vType = 1;
+                    if(userJSON.typPojazdu === 'Osobowy') vType = 2;
+                    if(userJSON.typPojazdu === 'Maszyna') vType = 3;
+                    if(userJSON.typPojazdu === 'Naczepa') vType = 4;
+                    $("#vehicle_type_id").select2("val", vType).trigger('change');
+                }
+
+                // Marka
+                const markaSelector = $("#vehicle_type_id").select2('val') == 4 ? '#trailer_brand_id' : '#marka_id';
+                if (!czyUzupelniacTylkoJesliPuste || isSelect2Empty(markaSelector)) {
+                    if (userJSON.marka) setSelect2ByText(markaSelector, userJSON.marka);
+                }
+
+                // Model
+                const currentModel = $('input[name="model"]').val() || "";
+                if (!czyUzupelniacTylkoJesliPuste || currentModel.trim() === "" || currentModel.trim() === ".") {
+                    $('input[name="model"]').val(userJSON.model && String(userJSON.model).trim() !== "" ? userJSON.model : ".");
+                }
+            }
+        }
+
+        async function handleRejestrator(userJSON) {
+            if(!userJSON.id) return;
+            ensureState('[name=rej]', true);
+
+            let typRej = userJSON.modelUrzadzenia || (userJSON.id.toLowerCase().startsWith('h') ? "SE5" : "");
+            const idNum = parseInt(userJSON.id);
+
+            const co = userJSON.firma || "";
+            const flota = userJSON.flota || "";
+            let domyslnaBaza = "[A] gps.ze-it.pl";
+
+            if (_m(co, "T1ZFUklT", "QkFCSU5TS0k=", "SU5UUkEgUy5B")) {
+                domyslnaBaza = "[A] gps.framelogic.pl";
+            } else if (_m(flota, "RVRPTEw=")) {
+                domyslnaBaza = "[A] gps.framelogic.pl";
+            } else if (_m(flota, "VEFVUk9O", "VEQgUy5B", "VERQ", "VE9L")) {
+                domyslnaBaza = "[A] gps-server.tpe.corp";
+                setSelect2ByText("#vehicle_type_id", "pojazd spalinowy", false);
+            } else if (_m(flota, "UEdF")) {
+                domyslnaBaza = "[A] gps.gkpge.pl";
+            }
+
+            const setConfigDb = async (baza) => {
+                // Opcje są statyczne – próbuj od razu, polling tylko jeśli element jeszcze nie widoczny
+                for (let i = 0; i < 20; i++) {
+                    if ($('select[name="config_db_id"]').length && setSelect2ByText('select[name="config_db_id"]', baza, false)) return;
+                    await new Promise(r => setTimeout(r, 50));
+                }
+            };
+
+            if (typRej.startsWith("Sk")) {
+                setSelect2ByText("#rodzaj_rejestratora_id", "Setivo");
+                document.getElementById("database-config").style.display = "inline-block";
+                await setConfigDb(domyslnaBaza);
+            } else if (typRej === "Albatros" || (idNum > 99999 && idNum < 999999)) {
+                setSelect2ByText("#rodzaj_rejestratora_id", "Albatros");
+                if (!userJSON.modelUrzadzenia || userJSON.modelUrzadzenia.trim() === "") {
+                    typRej = "Albatros 8.5";
+                }
+            } else if (typRej.toLowerCase().startsWith("fm") || idNum > 999999) {
+                setSelect2ByText("#rodzaj_rejestratora_id", "TELTONIKA");
+                document.getElementById("database-config").style.display = "inline-block";
+                await setConfigDb(domyslnaBaza);
+            }
+
+            if(typRej) setSelect2ByText("#typ_rejestratora_id", typRej);
+            $('[name=dscr]').first().val(userJSON.id);
+            ensureState('[name=rej_c]', true);
+
+            const $rejRow = $('[name=dscr]').closest('tr');
+            $rejRow.find('select').each(function() {
+                if (!isSelect2Empty(this)) return;
+
+                const hasNowyOption = $(this).find('option').filter(function() {
+                    return $(this).text().trim().toLowerCase() === 'nowy';
+                }).length > 0;
+                if (hasNowyOption) {
+                    setSelect2ByText(this, 'Nowy');
+                }
+            });
+        }
+
+        function handleCAN(userJSON) {
+            const can = userJSON.canConfig;
+            if (!can || String(can.isCan).toLowerCase() !== "true") return;
+
+            ensureState("#can", true);
+            ensureState("#can_c", true);
+
+            const flota = userJSON.flota || "";
+            const czyPominac1611 = _m(flota, "VEFVUk9O", "VEQgUy5B", "UEdF", "VERQ", "VE9L");
+
+            const check = (val, id) => { if (val && val.toLowerCase().includes("tak")) ensureState(id, true); };
+            check(can.canPredkosc, "#spn84_c");
+            if (!czyPominac1611) check(can.canPredkosc, "#spn1611_c");
+            check(can.canObroty, "#spn190_c");
+            check(can.canDystans, "#spn917_c");
+            check(can.canPaliwo, "#spn96_c");
+            check(can.canZuzycie, "#spn250_c");
+
+            if(can.canStatusy && can.canStatusy.toLowerCase().includes("tak")) {
+                ensureState("#spanstatus_c", true);
+                ensureState("#tagid_c", true);
+            }
+            if(can.canWebasto && can.canWebasto.toLowerCase().includes("tak")) {
+                ensureState("#webasto_can_c", true);
+                const wColor = document.querySelector('select[name="webasto_can_color"]');
+                if (wColor) { wColor.value = "#02488f"; wColor.dispatchEvent(new Event('change')); }
+            }
+        }
+
+        function handleD8AndTacho(userJSON) {
+            const tachoModel = userJSON.modelTacho === "Siemens" ? 1 : 2;
+            const czyJestWersja = (userJSON.wersjaTacho && userJSON.wersjaTacho.trim() !== "");
+
+            if (userJSON.d8 && userJSON.d8 !== "Brak") {
+                if (userJSON.d8 === "TMR") {
+                    ensureState("#tmr", true);
+                    forceInput("#tmr_status", userJSON.tmrResponse);
+                    $("#tmr_model_id").select2('val', tachoModel).trigger('change');
+                    forceInput("#tmr_nr_firmware", userJSON.wersjaTacho);
+                } else {
+                    ensureState("#kabel_d8", true);
+                    $("#kabel_d8_producent_id").select2('val', tachoModel).trigger('change');
+                    setSelect2ByText("#kabel_d8_podlaczenie_id", userJSON.d8 === "FMB640/FMC650" ? "FMB640" : "Tachoreader");
+                    setTimeout(() => clickRightDivBtn("kabel_d8_c"), 250);
+                }
+            }
+
+            if (czyJestWersja) {
+                ensureState("#tachoreader", userJSON.d8 === "Tachoreader");
+                ensureState("#fmb640", userJSON.d8 === "FMB640/FMC650");
+
+                if (userJSON.d8 === "Tachoreader") {
+                    $("#tachoreader_model_id").select2('val', tachoModel).trigger('change');
+                    forceInput("#tachoreader_status", 2);
+                    forceInput("#tachoreader_nr_firmware", userJSON.wersjaTacho);
+                    setTimeout(() => clickRightDivBtn("tachoreader_c"), 350);
+                } else if (userJSON.d8 === "FMB640/FMC650") {
+                    $("#fmb640_model_id").select2('val', tachoModel).trigger('change');
+                    forceInput("#fmb640_status", userJSON.wersjaTacho);
+                    forceInput("#fmb640_nr_firmware", ".");
+                    setTimeout(() => clickRightDivBtn("fmb640_c"), 350);
+                }
+            } else {
+                ensureState("#tachoreader", false);
+                ensureState("#fmb640", false);
+            }
+        }
+
+        async function handleDINs(userJSON, delayMs) {
+            if (!userJSON.dinConfig || typeof userJSON.dinConfig !== 'object') return;
+            const colors = ["Czerwony", "Żółty", "Khaki", "Srebrny"];
+            let cIdx = 0;
+
+            for (const key of Object.keys(userJSON.dinConfig)) {
+                const data = userJSON.dinConfig[key];
+                let nazwa = data.nazwa || key;
+                if (!nazwa) continue;
+
+                const dinNum = parseInt(data.bit);
+                const hasBit = !isNaN(dinNum) && String(data.bit).trim() !== "";
+                const stan = data.stan ? (data.stan.charAt(0).toUpperCase() + data.stan.slice(1)) : 'Niski';
+                const sn = data.sn || "";
+                let kolor = "Czarny";
+
+                if (nazwa.toLowerCase() === "webasto") {
+                    nazwa = "Webasto"; kolor = "Granatowy";
+                } else {
+                    if (cIdx < colors.length) kolor = colors[cIdx];
+                    cIdx++;
+                    nazwa = nazwa.charAt(0).toUpperCase() + nazwa.slice(1);
+                }
+                await addUrzadzenieDodatkoweDin(nazwa, dinNum, stan, kolor, sn, hasBit);
+            }
+        }
+
+        async function handleSondy(userJSON) {
+            const cleanFloat = (val) => val ? String(val).replace(/\.0$/, '') : '';
+
+            async function buildSonda(num, poj, skal, dataNum, nrWejscia, isRight, prawyZbiornikVal) {
+                const cleanPoj = cleanFloat(poj);
+                const cleanSkal = cleanFloat(skal);
+
+                if (!num && !cleanPoj) return;
+
+                // Upewnij się że wszystkie poprzednie zbiorniki istnieją w DOM
+                for (let n = 1; n <= dataNum; n++) {
+                    if (!$(`tr[data-number=${n}]`).length) {
+                        document.querySelector(".tanks.plus.fl-tipsy-bottom-right").click();
+                        for (let i = 0; i < 100; i++) {
+                            if ($(`tr[data-number=${n}]`).length) break;
+                            await new Promise(r => setTimeout(r, 20));
+                        }
+                    }
+                }
+
+                const wiersz = document.querySelector(`tr[data-number='${dataNum}']`);
+
+                // Jeśli wiersz jest już zatwierdzony (zielony) – nie ruszamy go
+                const goodBtn = wiersz.querySelector('div[data-name="tanks_good[]"]');
+                if (goodBtn && goodBtn.classList.contains('checkbox_checked')) return;
+
+                if (wiersz.querySelector('input[name="pojemnosc[]"]')) {
+                    wiersz.querySelector('input[name="pojemnosc[]"]').value = cleanPoj || '';
+                }
+
+                if (num) {
+                    const sondaRadio = wiersz.querySelector('input[type="radio"][value="1"]');
+                    if (sondaRadio) {
+                        sondaRadio.click();
+                        if(sondaRadio.parentElement.classList.contains('TfRadio')) sondaRadio.parentElement.click();
+                    }
+
+                    wiersz.children[2].children[1].children[2].click();
+
+                    for (let i = 0; i < 50; i++) {
+                        if (wiersz.querySelector('input[name="dlugosc_sondy[]"]')) break;
+                        await new Promise(r => setTimeout(r, 20));
+                    }
+
+                    const inSkal = wiersz.querySelector('input[name="dlugosc_sondy[]"]');
+                    const inNum = wiersz.querySelector('input[name="numer_fabryczny_sondy[]"]');
+                    if (inSkal && inNum) {
+                        inSkal.value = cleanSkal || '';
+                        inNum.value = num;
+                        $(wiersz.querySelector('select[name="producent_sondy[]"]')).select2('val', 1);
+                        $(wiersz.querySelector('select[name="nr_wejscia[]"]')).select2('val', nrWejscia);
+
+                        const lokalizacjaSelect = wiersz.querySelector('select[name="lokalizacja[]"]');
+                        if (lokalizacjaSelect) {
+                            if (!prawyZbiornikVal) setSelect2ByText(lokalizacjaSelect, "środek", false);
+                            else $(lokalizacjaSelect).select2('val', isRight ? 0 : 2);
+                        }
+
+                        wiersz.children[2].parentElement.children[3].children[0].click();
+                    }
+                } else if (cleanPoj) {
+                    const plywakRadio = wiersz.querySelector('input[type="radio"][value="2"]');
+                    if (plywakRadio) {
+                        plywakRadio.click();
+                        if(plywakRadio.parentElement.classList.contains('TfRadio')) plywakRadio.parentElement.click();
+                    }
+
+                    const nrWejsciaSelect = wiersz.querySelector('select[name="nr_wejscia[]"]');
+                    if (nrWejsciaSelect) $(nrWejsciaSelect).select2('val', nrWejscia);
+
+                    const lokalizacjaSelect = wiersz.querySelector('select[name="lokalizacja[]"]');
+                    if (lokalizacjaSelect) setSelect2ByText(lokalizacjaSelect, "środek", false);
+
+                    try {
+                        wiersz.children[2].parentElement.children[3].children[0].click();
+                    } catch(e) {
+                        console.warn("Nie udało się kliknąć zatwierdzenia", e);
+                    }
+                }
+            }
+
+            // Zbierz sondy które mają dane, przypisz do kolejnych slotów (1, 2...)
+            // ale nr wejścia zostaje z oryginału (an0=0, an1=1)
+            const sondy = [];
+            if (userJSON.an0Numer || userJSON.an0Pojemnosc) {
+                sondy.push({ num: userJSON.an0Numer, poj: userJSON.an0Pojemnosc, skal: userJSON.an0Skalowanie, nrWejscia: 0, isRight: userJSON.prawyZbiornik === "An0" });
+            }
+            if (userJSON.an1Numer || userJSON.an1Pojemnosc) {
+                sondy.push({ num: userJSON.an1Numer, poj: userJSON.an1Pojemnosc, skal: userJSON.an1Skalowanie, nrWejscia: 1, isRight: userJSON.prawyZbiornik === "An1" });
+            }
+
+            for (let i = 0; i < sondy.length; i++) {
+                const s = sondy[i];
+                await buildSonda(s.num, s.poj, s.skal, i + 1, s.nrWejscia, s.isRight, userJSON.prawyZbiornik);
+            }
+        }
+
+        // ==========================================
+        // URZĄDZENIA DODATKOWE (INNE) - z wykrywaniem duplikatów
+        // ==========================================
+
+        /**
+         * Szuka istniejącego wiersza w sekcji "Urządzenia dodatkowe (inne)"
+         * na podstawie tekstu wybranej opcji w select2.
+         * Zwraca element wiersza lub null jeśli nie znaleziono.
+         */
+        function findExistingDinoRow(searchString) {
+            const normalizedSearch = searchString.toLowerCase().replace(/\s/g, '');
+            const rows = Array.from(document.querySelectorAll('.dino_tr'));
+
+            return rows.find(row => {
+                // Sprawdź tekst wyświetlany przez select2 (.select2-chosen)
+                const chosen = row.querySelector('.select2-chosen');
+                if (chosen) {
+                    const chosenText = chosen.textContent.toLowerCase().replace(/\s/g, '');
+                    if (chosenText.includes(normalizedSearch)) return true;
+                }
+                // Fallback – sprawdź wartość aktualnie wybranej opcji w <select>
+                const select = row.querySelector('select');
+                if (select && select.selectedIndex >= 0) {
+                    const optText = (select.options[select.selectedIndex].text || '').toLowerCase().replace(/\s/g, '');
+                    if (optText.includes(normalizedSearch)) return true;
+                }
+                return false;
+            }) || null;
+        }
+
+        /**
+         * Jeśli urządzenie już istnieje w protokole – tylko zaznacza checkbox.
+         * Jeśli nie istnieje – dodaje nowy wiersz i zaznacza checkbox.
+         * Zwraca true jeśli wiersz był już obecny, false jeśli dodano nowy.
+         */
+        function addUrzadzenieDodatkoweInne(urzadzenie) {
+            const existingRow = findExistingDinoRow(urzadzenie);
+
+            if (existingRow) {
+                // Wiersz już istnieje – tylko upewnij się że checkbox jest zaznaczony
+                const chk = existingRow.querySelector('div[data-name="dino_good[]"]');
+                if (chk && chk.classList.contains('checkbox_unchecked')) {
+                    chk.click();
+                }
+                return true; // znaleziono istniejący
+            }
+
+            // Nie istnieje – dodaj nowy wiersz
+            document.getElementsByClassName("dino plus fl-tipsy-bottom-right")[0].click();
+            const newDeviceId = document.getElementsByClassName("activities-section header-title")[0].previousElementSibling.children[2].children[0].id;
+
+            if (!setSelect2ByText($(`#${newDeviceId}`).next(), urzadzenie)) {
+                $('.odd.active.added.dino_tr').first().remove();
+                return false;
+            }
+            const newCanTr = document.getElementsByClassName("active added dino_tr");
+            if (newCanTr.length > 0) newCanTr[newCanTr.length - 1].classList.add("bad");
+            return false; // dodano nowy
+        }
+
+        async function checkOtherDeviceRow(searchString) {
+            // Czekaj aż wiersz pojawi się z poprawnym tekstem (max 2s)
+            for (let i = 0; i < 40; i++) {
+                const rows = Array.from(document.querySelectorAll('.dino_tr.active, .dino_tr.added'));
+                const targetRow = rows.find(row => row.innerText.toLowerCase().includes(searchString.toLowerCase()));
+                if (targetRow) {
+                    const chk = targetRow.querySelector('div[data-name="dino_good[]"]');
+                    if (chk && chk.classList.contains('checkbox_unchecked')) chk.click();
+                    return;
+                }
+                await new Promise(r => setTimeout(r, 50));
+            }
+        }
+
+        async function handleOtherDevices(userJSON) {
+            const flota = userJSON.flota || "";
+            const czySpecjalnaFlota = _m(flota, "VEFVUk9O", "VEQgUy5B", "VERQ", "VE9L");
+
+            if (String(userJSON.rfid) === "true") {
+                const wasExisting = addUrzadzenieDodatkoweInne('RFID - czytnik zbliżeniowy');
+                // Zabezpieczenie – jeśli select2 wolno ładuje tekst, checkOtherDeviceRow doklika
+                if (!wasExisting) await checkOtherDeviceRow('rfid');
+            }
+
+            if (String(userJSON.immo) === "true") {
+                if (czySpecjalnaFlota) {
+                    const wasExisting = await addDodatkowaCzynnosc('Immobilizer');
+                    if (!wasExisting) await checkDodatkowaCzynnoscRow('immob');
+                } else {
+                    const wasExisting = addUrzadzenieDodatkoweInne('immobiliser');
+                    if (!wasExisting) await checkOtherDeviceRow('immob');
+                }
+            }
+        }
+
+        function handleFinalInfo(userJSON) {
+            $('[name=miejsce_rejestratora]').val(userJSON.gdzieRejestrator || ".");
+            $('[name=stan_licznika]').val(userJSON.przebieg || ".");
+
+            setSelect2ByText("#wykonal", userJSON.monter, false);
+
+            if(userJSON.data) $("#kiedy2").val(userJSON.data);
+
+            if(userJSON.godzina) {
+                let godz = parseInt(userJSON.godzina, 10).toString();
+                $("#kiedy2hour").select2('val', godz).trigger('change');
+            }
+
+            if(userJSON.minuta) {
+                let min = parseInt(userJSON.minuta, 10).toString();
+                $("#kiedy2minute").select2('val', min).trigger('change');
+            }
+
+            const currentUwagi = $("#uwagi").val();
+            const uwagiParts = [
+                currentUwagi,
+                userJSON.komentarzDoProtokolu
+            ].filter(part => part && part.trim() !== "");
+
+            $("#uwagi").val(uwagiParts.join('\n\n'));
+        }
+
+        // ==========================================
+        // FUNKCJE WSPOMAGAJĄCE (NARZĘDZIA)
+        // ==========================================
+
+        async function setSelect2Ajax(selector, text) {
+            if (!text || text.trim() === "") return false;
+            const $el = $(selector);
+            if ($el.length === 0) return false;
+
+            const normalize = (s) => s.trim().replace(/\s/g, '').toLowerCase();
+            const searchText = normalize(text);
+
+            // Pobierz ID kontenera drop dla tego konkretnego elementu
+            const getDropContainer = () => {
+                // select2 v3 – kontener ma id bazujący na id selecta
+                const elId = $el.attr('id') || $el.closest('.select2-container').attr('id');
+                if (elId) {
+                    const dropId = '#select2-drop'; // v3 używa jednego globalnego
+                }
+                return $('#select2-drop');
+            };
+
+            const isDropdownOpen = () => {
+                const $drop = getDropContainer();
+                return $drop.length && $drop.is(':visible') && !$drop.hasClass('select2-display-none');
+            };
+
+            const openAndType = async () => {
+                // Upewnij się że żaden inny dropdown nie jest otwarty
+                try { $('.select2-container.select2-dropdown-open').not($el.next()).find('a').trigger('click'); } catch(e) {}
+                await new Promise(r => setTimeout(r, 100));
+
+                try { $el.select2('open'); } catch(e) { return false; }
+
+                // Czekaj aż dropdown będzie widoczny (max 2s)
+                for (let i = 0; i < 40; i++) {
+                    await new Promise(r => setTimeout(r, 50));
+                    if (isDropdownOpen()) break;
+                }
+
+                if (!isDropdownOpen()) return false;
+
+                // Znajdź pole input w dropdownie
+                const $search = $('#select2-drop input.select2-input, #select2-drop .select2-search input');
+                if ($search.length === 0) return false;
+
+                // Wyczyść i wpisz tekst
+                $search.focus().val('').trigger('input');
+                await new Promise(r => setTimeout(r, 50));
+                $search.val(text).trigger('input').trigger('keyup').trigger('keypress');
+
+                return true;
+            };
+
+            // Max 3 próby otwarcia
+            let typed = false;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                typed = await openAndType();
+                if (typed) break;
+                await new Promise(r => setTimeout(r, 400));
+            }
+
+            if (!typed) return false;
+
+            let found = false;
+
+            for (let i = 0; i < 30; i++) {
+                await new Promise(r => setTimeout(r, 200));
+
+                if (!isDropdownOpen()) {
+                    // Dropdown zamknął się – sprawdź czy może już wybrał wartość automatycznie
+                    const selected = $el.select2('data');
+                    if (selected && selected.text && normalize(selected.text).includes(searchText)) {
+                        found = true;
+                        break;
+                    }
+                    // Spróbuj ponownie otworzyć
+                    const reopened = await openAndType();
+                    if (!reopened) break;
+                    continue;
+                }
+
+                if ($('#select2-drop .select2-no-results').is(':visible')) break;
+
+                const $results = $('#select2-drop .select2-result-label');
+                if ($results.length === 0) continue;
+
+                let exactMatch = null;
+                let partialMatch = null;
+
+                $results.each(function() {
+                    const resultText = normalize($(this).text());
+                    if (resultText === searchText) {
+                        exactMatch = $(this);
+                        return false;
+                    }
+                    if (!partialMatch && resultText.includes(searchText)) {
+                        partialMatch = $(this);
+                    }
+                });
+
+                const matched = exactMatch || partialMatch;
+
+                if (matched) {
+                    let target = matched.closest('.select2-result');
+                    if (target.length === 0) target = matched;
+
+                    const node = target[0];
+                    node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                try { $el.select2('close'); } catch(e) {}
+            }
+            return found;
+        }
+
+        async function trySetSelect2(selector, text, exact = false, isLicensePlate = false, maxAttempts = 15, delayMs = 100) {
+            if (!text) return false;
+            for (let i = 0; i < maxAttempts; i++) {
+                if (setSelect2ByText(selector, text, exact, isLicensePlate)) {
+                    return true;
+                }
+                await new Promise(r => setTimeout(r, delayMs));
+            }
+            return false;
+        }
+
+        function setSelect2ByText(selector, text, exact = true, isLicensePlate = false) {
+            if (!text) return false;
+            let foundValue = null;
+            let $foundSelect = null;
+
+            const normalize = (str) => {
+                let s = str.trim().toLowerCase();
+                if (!exact) s = s.replace(/\s/g, '').replace(/-/g, '');
+                if (isLicensePlate) s = s.replace(/o/g, '0');
+                return s;
+            };
+
+            const search = normalize(text);
+
+            $(selector).each(function() {
+                const $currentSelect = $(this);
+                $currentSelect.find('option').each(function() {
+                    const optTextRaw = $(this).text();
+                    const optText = normalize(optTextRaw);
+
+                    if (exact ? optText === search : optText.includes(search)) {
+                        foundValue = $(this).val();
+                        $foundSelect = $currentSelect;
+                        return false;
+                    }
+                });
+                if (foundValue) return false;
+            });
+
+            if (foundValue && $foundSelect) {
+                $foundSelect.select2('val', foundValue).trigger('change');
+                return true;
+            }
+            return false;
+        }
+
+        function forceInput(selector, value) {
+            $(selector).val(value).trigger('input').trigger('change').removeClass('mValidatorError');
+        }
+
+        function ensureState(selector, shouldBeChecked) {
+            const el = $(selector)[0];
+            if (el && el.checked !== shouldBeChecked) el.click();
+        }
+
+        function clickRightDivBtn(dataName) {
+            const btn = document.querySelector(`div[data-name="${dataName}"].checkbox_unchecked`);
+            if(btn) btn.click();
+        }
+
+        // ==========================================
+        // POMOCNIK DIN: szuka pierwszego pustego wiersza DIN (name="dev[]")
+        // ==========================================
+        function findEmptyDinRow() {
+            const rows = Array.from(document.querySelectorAll('.din_tr'));
+            return rows.find(row => {
+                const devSelect = row.querySelector('select[name="dev[]"]');
+                if (!devSelect) return false;
+                // Wiersz jest pusty gdy wartość selecta jest pusta
+                return devSelect.value === '' || devSelect.value === null;
+            }) || null;
+        }
+
+        async function addUrzadzenieDodatkoweDin(urzadzenie, din, stan, color, sn, hasBit = true) {
+            // Max 5 urządzeń DIN
+            if (document.getElementsByClassName("active added din_tr").length >= 5) return;
+
+            // Szukaj istniejącego pustego wiersza zamiast dodawać nowy
+            const emptyRow = findEmptyDinRow();
+            let newDinTr = null;
+
+            if (emptyRow) {
+                // Użyj pustego wiersza – ustaw nazwę urządzenia i pobierz referencję
+                const devSelect = emptyRow.querySelector('select[name="dev[]"]');
+                if (devSelect) {
+                    // devSelect to <select name="dev[]"> – przekazujemy go bezpośrednio (ma option[])
+                    setSelect2ByText(devSelect, urzadzenie);
+                    newDinTr = emptyRow;
+                }
+            }
+
+            if (!newDinTr) {
+                // Brak pustego wiersza – dodaj nowy (oryginalna logika)
+                const countBefore = document.getElementsByClassName("active added din_tr").length;
+                document.getElementsByClassName("din plus fl-tipsy-bottom-right")[0].click();
+
+                // Czekaj aż nowy wiersz pojawi się w DOM
+                for (let i = 0; i < 50; i++) {
+                    if (document.getElementsByClassName("active added din_tr").length > countBefore) break;
+                    await new Promise(r => setTimeout(r, 30));
+                }
+
+                const newDeviceId = document.getElementsByClassName("dino-section header-title")[0]
+                    .previousElementSibling.children[1].children[0].id;
+
+                setSelect2ByText($(`#${newDeviceId}`).next(), urzadzenie);
+
+                const newCanTr = document.getElementsByClassName("active added din_tr");
+                if(newCanTr.length > 0) newCanTr[newCanTr.length - 1].classList.add("bad");
+
+                // Oryginalna logika: od td.label (rodzic selecta) → nextSibling.nextSibling daje td colspan
+                // Ale potem kod używa newDinTr.children[X] — musimy mieć całe <tr>
+                // Wyciągamy <tr> będący rodzicem td.label
+                newDinTr = $(`#${newDeviceId}`)[0].closest('tr');
+            }
+
+            // Używamy find() zamiast kruchej nawigacji przez children[X].children[Y]
+            if (hasBit) {
+                $(newDinTr).find('select[name="nrwej[]"]').select2('val', din).trigger('change');
+            }
+
+            $(newDinTr).find('select[name="stan[]"]').select2('val', (stan === 'Wysoki' ? 1 : 0)).trigger('change');
+            setSelect2ByText($(newDinTr).find('select[name="color[]"]'), color);
+
+            if (sn !== "") {
+                for (let i = 0; i < 30; i++) {
+                    if ($(newDinTr).find('input[name="din_content[]"]').length > 0) break;
+                    await new Promise(r => setTimeout(r, 50));
+                }
+                const $snInput = $(newDinTr).find('input[name="din_content[]"]');
+                if ($snInput.length > 0) forceInput($snInput, sn);
+            }
+            if (hasBit) {
+                $(newDinTr).find('div[data-name="din_good[]"].checkbox_unchecked').click();
+            }
+        }
+
+        /**
+         * Szuka istniejącego wiersza w sekcji "Dodatkowe czynności"
+         * na podstawie tekstu wybranej opcji w select2.
+         * Zwraca element wiersza lub null jeśli nie znaleziono.
+         */
+        function findExistingActivitiesRow(searchString) {
+            const normalizedSearch = searchString.toLowerCase().replace(/\s/g, '');
+            const rows = Array.from(document.querySelectorAll('.activities_tr'));
+
+            return rows.find(row => {
+                const chosen = row.querySelector('.select2-chosen');
+                if (chosen) {
+                    const chosenText = chosen.textContent.toLowerCase().replace(/\s/g, '');
+                    if (chosenText.includes(normalizedSearch)) return true;
+                }
+                const select = row.querySelector('select');
+                if (select && select.selectedIndex >= 0) {
+                    const optText = (select.options[select.selectedIndex].text || '').toLowerCase().replace(/\s/g, '');
+                    if (optText.includes(normalizedSearch)) return true;
+                }
+                return false;
+            }) || null;
+        }
+
+        /**
+         * Jeśli czynność już istnieje – tylko zaznacza checkbox.
+         * Jeśli nie istnieje – dodaje nowy wiersz.
+         * Zwraca true jeśli wiersz był już obecny.
+         */
+        async function addDodatkowaCzynnosc(czynnosc) {
+            const existingRow = findExistingActivitiesRow(czynnosc);
+
+            if (existingRow) {
+                let chk = existingRow.querySelector('div[data-name="activities_good[]"]');
+                if (!chk) chk = existingRow.querySelector('.checkbox_unchecked');
+                if (chk && chk.classList.contains('checkbox_unchecked')) chk.click();
+                return true; // znaleziono istniejący
+            }
+
+            const plusBtn = document.querySelector(".activities.plus.fl-tipsy-bottom-right");
+            if(!plusBtn) return false;
+            const countBefore = document.querySelectorAll('.active.added.activities_tr').length;
+            plusBtn.click();
+
+            // Czekaj aż nowy wiersz pojawi się w DOM
+            for (let i = 0; i < 50; i++) {
+                if (document.querySelectorAll('.active.added.activities_tr').length > countBefore) break;
+                await new Promise(r => setTimeout(r, 30));
+            }
+            const newRows = document.querySelectorAll('.active.added.activities_tr');
+            if(newRows.length === 0) return false;
+
+            const targetRow = newRows[newRows.length - 1];
+            const selectElement = targetRow.querySelector('select');
+
+            if(!selectElement) {
+                console.error("Nie znaleziono elementu <select> w wierszu czynności dodatkowych");
+                targetRow.remove();
+                return false;
+            }
+
+            if(!setSelect2ByText(selectElement, czynnosc, false)) {
+                targetRow.remove();
+                return false;
+            }
+
+            targetRow.classList.add("bad");
+            return false; // dodano nowy
+        }
+
+        async function checkDodatkowaCzynnoscRow(searchString) {
+            // Czekaj aż wiersz pojawi się z poprawnym tekstem (max 2s)
+            for (let i = 0; i < 40; i++) {
+                const rows = Array.from(document.querySelectorAll('.active.activities_tr, .added.activities_tr'));
+                const targetRow = rows.find(row => row.innerText.toLowerCase().includes(searchString.toLowerCase()));
+                if (targetRow) {
+                    let chk = targetRow.querySelector('div[data-name="activities_good[]"]');
+                    if (!chk) chk = targetRow.querySelector('.checkbox_unchecked');
+                    if (chk && chk.classList.contains('checkbox_unchecked')) chk.click();
+                    return;
+                }
+                await new Promise(r => setTimeout(r, 50));
+            }
+        }
+
+        async function handleTablet(userJSON) {
+            if (String(userJSON.tablet) !== "true") return;
+
+            // Sprawdź czy tablet już istnieje w protokole
+            const existingTablet = findExistingDinoRow('tablet');
+            let tabletRow = existingTablet;
+
+            if (!existingTablet) {
+                const countBefore = document.querySelectorAll('.dino_tr.active, .dino_tr.added').length;
+                addUrzadzenieDodatkoweInne('TABLET');
+                // Czekaj aż wiersz tabletu pojawi się w DOM
+                for (let i = 0; i < 50; i++) {
+                    const rows = Array.from(document.querySelectorAll('.dino_tr.active, .dino_tr.added'));
+                    if (rows.length > countBefore) {
+                        tabletRow = rows.find(row => row.innerText.toLowerCase().includes('tablet'));
+                        if (tabletRow) break;
+                    }
+                    await new Promise(r => setTimeout(r, 30));
+                }
+            }
+
+            if (tabletRow) {
+                const commentArea = tabletRow.querySelector('textarea');
+                if (commentArea) {
+                    let kom = userJSON.tabletNr || "";
+                    if (kom) kom = "Numer " + kom;
+                    else if (String(userJSON.zasilanie) === "true") kom = "Wyprowadzenie zasilania";
+
+                    commentArea.value = kom;
+                    commentArea.dispatchEvent(new Event('input'));
+                    commentArea.dispatchEvent(new Event('change'));
+                }
+                const chk = tabletRow.querySelector('div[data-name="dino_good[]"]');
+                if (chk && chk.classList.contains('checkbox_unchecked')) chk.click();
+            }
+        }
+
+        async function isInvoiceActiveOnAnotherVehicle(id) {
+            if(!id) return;
+            const baseUrl = `/api/invoice/vehicle?current_page=1&current_limit=10&form_action=search&form_search=${id}&form_filter=filter_enabled%3D1%26firma1_id%3D%26company_user_vehicle_groups%3D%26status_sim%3D1%26mapa_typ%3D0%26table_calendar_input%3D%26table_calendar_input2%3D%26table_calendar_input3%3D%26table_calendar_input4%3D%26table_calendar_input5%3D%26table_calendar_input6%3D&mod-sidemenu-val=`;
+            const res = await fetch(baseUrl);
+            const text = await res.text();
+            const doc = new DOMParser().parseFromString(text, 'text/html');
+            const invoices = Array.from(doc.getElementsByClassName('datatable_dscr'));
+
+            if (invoices.some(dscr => dscr.innerText.includes(id))) {
+                alert('Rejestrator może posiadać aktywny MFV. Sprawdź, czy to na pewno nowy montaż.');
+            }
+        }
+    }
+})();

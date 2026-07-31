@@ -2,6 +2,32 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.2",
+        "date": "2026-07-31",
+        "entries": [
+            ("Formularz", [
+                "Nowy przycisk 'Panel' - otwiera panel GPS (lub dedykowany panel danej floty, np. Tauron/PGE/MPWiK) i kopiuje ID urządzenia do schowka",
+                "Aby przycisk 'Panel' działał, zaimportuj linki: pobierz plik Excel 'Baza' i zaimportuj go w Ustawienia -> Słowniki -> Słowniki/Importy -> Linki flot -> Importuj z Excel",
+                "Przyciski 'Flota' i 'Panel' są nieaktywne, gdy formularz nie ma przypisanej floty",
+                "Pola 'Nr boczny' i 'CCID' mają teraz przycisk kopiowania do schowka",
+                "Nowe pole 'Pojemność zbiorników' w zakładce CAN",
+                "Zmiana CCID zawsze aktualizuje pole SIM na numer przypisany do tego CCID (nawet gdy SIM był już wypełniony)",
+                "Pola 'Gdzie rejestrator' i 'Marka/model' (razem z wybranym Typem pojazdu) mają przycisk '+' dodający wpisaną wartość do słownika bez wychodzenia z formularza - z krótkim podświetleniem i komunikatem po dodaniu",
+            ]),
+            ("Lista główna", [
+                "Poprawiono trafialność kliknięcia w checkbox kolumny 'Odebrano' - reaguje na kliknięcie w całą komórkę, nie tylko w samą ikonkę",
+                "Menu kontekstowe (prawy klik) ma teraz też opcję 'Przejdź do panelu', analogiczną do 'Przejdź do floty'",
+            ]),
+            ("Ustawienia", [
+                "Słownik Pojazdy: pole 'Typ pojazdu' w dialogu Dodaj/Edytuj jest teraz listą wyboru (Ciężarowy/Osobowy/Maszyna/Naczepa) - nie można już wpisać własnej wartości",
+            ]),
+            ("Inne", [
+                "Poprawka błędów",
+                "Aby nowe funkcjonalności działały poprawnie, należy zaktualizować skrypt do uzupełniania protokołu w zakładce Tampermonkey",
+            ]),
+        ],
+    },
+    {
         "version": "1.2.1",
         "date": "2026-05-12",
         "entries": [

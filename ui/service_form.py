@@ -146,6 +146,13 @@ class ServiceForm(QDialog):
         self._btn_fleet.setStyleSheet(_BTN_STYLE_NEUTRAL)
         f_lay.addWidget(self._btn_fleet)
 
+        self._btn_panel = QPushButton("🖥️  Panel")
+        self._btn_panel.setFixedHeight(_BTN_H)
+        self._btn_panel.setMinimumWidth(110)
+        self._btn_panel.setStyleSheet(_BTN_STYLE_NEUTRAL)
+        self._btn_panel.setToolTip("Otwórz panel GPS i skopiuj ID urządzenia do schowka")
+        f_lay.addWidget(self._btn_panel)
+
         f_lay.addStretch()
 
         if not self._edit_mode:
@@ -184,6 +191,7 @@ class ServiceForm(QDialog):
         self._btn_cancel.clicked.connect(self.reject)
         self._btn_json.clicked.connect(self._on_copy_json)
         self._btn_fleet.clicked.connect(self._on_open_fleet)
+        self._btn_panel.clicked.connect(self._on_open_panel)
         self._tab_montaz._fleet_name_edit.textChanged.connect(self._on_fleet_changed)
         if self._edit_mode:
             self._btn_duplicate.clicked.connect(self._on_duplicate)
@@ -206,6 +214,24 @@ class ServiceForm(QDialog):
             self._btn_fleet.setText("🌐  Flota")
             self._btn_fleet.setToolTip("Brak przypisanej floty")
             self._btn_fleet.setEnabled(False)
+
+        panel_name = self._panel_name_for_fleet(f) if f else ""
+        if panel_name:
+            self._btn_panel.setText(f"🖥️  Panel {panel_name}")
+            self._btn_panel.setToolTip(f"Otwórz panel {panel_name} i skopiuj ID urządzenia do schowka")
+            self._btn_panel.setEnabled(True)
+        else:
+            self._btn_panel.setText("🖥️  Panel")
+            self._btn_panel.setToolTip("Brak przypisanej floty")
+            self._btn_panel.setEnabled(False)
+
+    def _panel_name_for_fleet(self, fleet: str) -> str:
+        """Zwraca nazwę panelu (np. 'GPS', 'Tauron') dopasowaną do floty, albo '' jeśli brak linku."""
+        if self._db.get_url_for_fleet(f"Panel - {fleet}"):
+            return fleet
+        if self._db.get_url_for_fleet("Panel - GPS"):
+            return "GPS"
+        return ""
 
     def _on_open_fleet(self):
         self._tab_montaz.collect_to_record(self._record)
@@ -230,6 +256,37 @@ class ServiceForm(QDialog):
                 f"Nie znaleziono linku dla floty \"{fleet}\".\n"
                 "Dodaj go w Ustawienia → Slownniki → Linki flot."
             )
+
+    def _on_open_panel(self):
+        self._tab_montaz.collect_to_record(self._record)
+        fleet = (self._record.fleet_name or "").strip()
+        if not fleet:
+            return
+
+        url = self._db.get_url_for_fleet(f"Panel - {fleet}")
+        if not url:
+            url = self._db.get_url_for_fleet("Panel - GPS")
+        if not url:
+            QMessageBox.information(
+                self, "Brak linku",
+                "Nie znaleziono linku do panelu.\n"
+                "Dodaj go w Ustawienia → Słowniki → Linki flot (klucz \"Panel - GPS\" "
+                "lub \"Panel - <flota>\" dla wyjątków)."
+            )
+            return
+
+        device_id = (self._record.device_id or "").strip()
+        if device_id:
+            QApplication.clipboard().setText(device_id)
+            self._status_message(f"ID urządzenia ({device_id}) skopiowane do schowka.")
+
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _status_message(self, text: str) -> None:
+        try:
+            self.window().statusBar().showMessage(text, 3000)
+        except Exception:
+            pass
 
     def _on_paste_json(self):
         if self._is_dirty():

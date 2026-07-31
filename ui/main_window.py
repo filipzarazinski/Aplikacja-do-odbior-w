@@ -90,6 +90,14 @@ class RowColorDelegate(QStyledItemDelegate):
         super().initStyleOption(option, index)
         option.backgroundBrush = QBrush(Qt.NoBrush)
 
+    def editorEvent(self, event, model, option, index):
+        # Wyłączamy natywne przełączanie checkboxa po kliknięciu w wąski obszar
+        # wyliczany przez styl Qt – nie zgadza się z wycentrowaną ikonką rysowaną
+        # w _paint_checkbox. Całą komórkę obsługuje MainWindow._on_cell_clicked.
+        if index.flags() & Qt.ItemIsUserCheckable:
+            return False
+        return super().editorEvent(event, model, option, index)
+
     def paint(self, painter, option, index):
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
@@ -1482,6 +1490,15 @@ class MainWindow(QMainWindow):
 
         attr = self._active_columns[col][1] if col < len(self._active_columns) else ""
 
+        if attr == "_odebrane":
+            item = self._table.item(row, col)
+            if item and (item.flags() & Qt.ItemIsUserCheckable):
+                new_state = Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked
+                item.setCheckState(new_state)
+            self._selected_record_id = self._get_record_id_for_row(row)
+            self._update_buttons()
+            return
+
         if attr in _COPY_ATTRS:
             item = self._table.item(row, col)
             if item:
@@ -1596,6 +1613,25 @@ class MainWindow(QMainWindow):
                         q_url.setQuery(query)
                     QDesktopServices.openUrl(q_url)
                 act_fleet.triggered.connect(_open_fleet)
+
+            panel_name = ""
+            if fleet and self._db.get_url_for_fleet(f"Panel - {fleet}"):
+                panel_name = fleet
+            elif self._db.get_url_for_fleet("Panel - GPS"):
+                panel_name = "GPS"
+            panel_url = self._db.get_url_for_fleet(f"Panel - {panel_name}") if panel_name else ""
+            label_panel = f"🖥️  Przejdź do panelu {panel_name}" if panel_name else "🖥️  Przejdź do panelu"
+            act_panel = menu.addAction(label_panel)
+            act_panel.setEnabled(bool(fleet and panel_url))
+            if fleet and panel_url:
+                def _open_panel(*, u=panel_url, r=rec):
+                    device_id = (r.device_id or "").strip()
+                    if device_id:
+                        QApplication.clipboard().setText(device_id)
+                        self._status_bar.showMessage(f"ID urządzenia ({device_id}) skopiowane do schowka.", 3000)
+                    QDesktopServices.openUrl(QUrl(u))
+                act_panel.triggered.connect(_open_panel)
+
             menu.addSeparator()
 
         act_ref = menu.addAction("⟳  Odśwież")

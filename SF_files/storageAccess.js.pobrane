@@ -1,0 +1,87 @@
+/* eslint-disable */
+function createBrowserHelper() {
+    const userAgent = window.navigator.userAgent;
+    let re, m, browserName, browserVersion;
+    let elements = 2; // returns major/minor release number
+    const regexps = {
+        Chrome: [/Chrome\/(\S+)/],
+        Firefox: [/Firefox\/(\S+)/],
+        MSIE: [/MSIE (\S+);/ /* IE 10 and earlier */ , /Trident\/(\S+)/] /* IE 11 */ ,
+        Opera: [/Opera\/.*?Version\/(\S+)/ /* Opera 10 */ , /Opera\/(\S+)/ /* Opera 9 and older */ ],
+        Safari: [/Version\/(\S+).*?Safari\//],
+    };
+
+    if (userAgent.includes('Edge')) {
+        browserName = 'Edge';
+    } else if (userAgent.includes('PhantomJS')) {
+        browserName = 'PhantomJS';
+    } else {
+        for (const browser in regexps) {
+            if (Object.prototype.hasOwnProperty.call(regexps, browser)) {
+                while ((re = regexps[browser].shift())) {
+                    if ((m = userAgent.match(re))) {
+                        browserVersion = m[1].match(new RegExp('[^.]+(?:.[^.]+){0,' + --elements + '}'))[0];
+                        browserName = browser;
+                    }
+                }
+            }
+        }
+    }
+
+    return {
+        isChrome: () => browserName === 'Chrome',
+        isFirefox: () => browserName === 'Firefox',
+        isSafari: () => browserName === 'Safari',
+        getBrowserVersion: () => browserVersion,
+    };
+}
+
+const BrowserHelper = createBrowserHelper();
+
+function checkStorageAccess() {
+    // only need to handle storage access if API exists - if not, we can assume that we'll have access
+    if (document.hasStorageAccess) {
+        document.hasStorageAccess().then(async (hasAccess) => {
+            if (hasAccess) {
+                console.log('Site has storage API access');
+            } else {
+                const permission = await navigator.permissions.query({
+                    name: 'storage-access',
+                });
+                if (permission.state === 'granted') {
+                    console.log('Site already has storage access granted, requesting from browser');
+                    await document.requestStorageAccess();
+                } else {
+                    console.log('Site has does not have storage API access, prompting user');
+                    const currentUrl = encodeURIComponent(window.location.href);
+                    window.location.replace('storageAccess.html?redirect=' + currentUrl);
+                }
+            }
+        });
+    }
+}
+
+function isStorageAccessCheckEnabledViaUrlParam() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('cwcStorageAccessCheck') === 'true') {
+        console.log('Storage access check is enabled via query param');
+        return true;
+    }
+    // The original query params will be stored in the sessionStorage during OAuth redirect, so check the cached params also.
+    const cachedStates = sessionStorage.getItem('OAuthState') || '';
+    if (typeof cachedStates === 'string' && cachedStates.indexOf('cwcStorageAccessCheck=true') > -1) {
+        console.log('Storage access check is enabled via cached query params');
+        return true;
+    }
+    return false;
+}
+
+function shouldCheckStorageAccess() {
+    // For now, enable the storage access check only when a specific URL param is present
+    // (Also, this does not really take into an account other windows where storageAccess.js is being used such as interaction.html)
+    return isStorageAccessCheckEnabledViaUrlParam(); // BrowserHelper.isChrome() && BrowserHelper.getBrowserVersion() > 119 && window.isSecureContext;
+}
+
+if (shouldCheckStorageAccess()) {
+    checkStorageAccess();
+}

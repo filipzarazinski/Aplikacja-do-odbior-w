@@ -795,6 +795,7 @@ class SettingsWindow(QDialog):
 
     def _build_pojazdy_tab(self) -> QWidget:
         from ui.dict_tab import DictTab
+        from config import VEHICLE_TYPES
 
         def saver(vals):
             self._db.upsert_vehicle_model(vals[0], vals[1] if len(vals) > 1 else "")
@@ -816,6 +817,7 @@ class SettingsWindow(QDialog):
             excel_sheet="Model_Typ",
             excel_parser=excel_parser,
             add_labels=["Marka i model", "Typ pojazdu"],
+            combo_fields={1: VEHICLE_TYPES},
             commit_fn=self._db.commit,
             lazy=True,
         )

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QLabel, QLineEdit, QComboBox, QTextEdit,
     QCheckBox, QRadioButton, QSpinBox, QDateEdit, QTimeEdit,
     QFrame, QButtonGroup, QTabWidget,
-    QSizePolicy, QApplication, QAbstractSpinBox, QCompleter
+    QSizePolicy, QApplication, QAbstractSpinBox, QCompleter, QToolTip
 )
 from PySide6.QtCore import Qt, QDate, QTime, Slot, QTimer, QEvent, QStringListModel
 from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon, QAction
@@ -390,10 +390,14 @@ class MontazTab(QWidget):
         self._przek_rej_edit.setVisible(False)
         g.addWidget(self._przek_rej_edit, 4, 0, Qt.AlignLeft)
         
-        self._side_edit = _inp(""); g.addWidget(self._side_edit, 4, 2)
+        self._side_edit = _inp("")
+        self._add_copy_button(self._side_edit)
+        g.addWidget(self._side_edit, 4, 2)
         self._device_model_combo = _inp(""); g.addWidget(self._device_model_combo, 4, 3)
-        
-        self._ccid_edit = _inp(""); g.addWidget(self._ccid_edit, 4, 4) 
+
+        self._ccid_edit = _inp("")
+        self._add_copy_button(self._ccid_edit)
+        g.addWidget(self._ccid_edit, 4, 4)
         
         self._vehicle_type_combo = _inp("")
         self._vehicle_type_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -571,6 +575,12 @@ class MontazTab(QWidget):
         self._can_type_grp.addButton(self._can_truck_rb)
         self._can_type_grp.addButton(self._can_car_rb)
         radio_lay.addWidget(self._can_truck_rb); radio_lay.addWidget(self._can_car_rb)
+
+        radio_lay.addSpacing(6)
+        radio_lay.addWidget(_lbl("Pojemność zbiorników"))
+        self._tank_capacity_edit = _inp("")
+        radio_lay.addWidget(self._tank_capacity_edit)
+
         radio_lay.addStretch()
         cl.addLayout(radio_lay, 1, 0, 4, 1)
 
@@ -773,6 +783,38 @@ class MontazTab(QWidget):
         act.setToolTip("Kopiuj do schowka")
         act.triggered.connect(lambda: self._copy_and_flash(edit))
 
+    def _add_dict_button(self, edit: QLineEdit, tooltip: str, on_click) -> None:
+        """Dodaje ikonę '+' wewnątrz QLineEdit, zapisującą wpisaną wartość do słownika."""
+        px = QPixmap(11, 11)
+        px.fill(Qt.transparent)
+        p = QPainter(px)
+        p.setPen(QColor("#64748b"))
+        p.drawLine(5, 1, 5, 9)
+        p.drawLine(1, 5, 9, 5)
+        p.end()
+        act = edit.addAction(QIcon(px), QLineEdit.TrailingPosition)
+        act.setToolTip(tooltip)
+        act.triggered.connect(lambda _=False: on_click())
+
+    def _show_status(self, text: str) -> None:
+        try:
+            self.window().statusBar().showMessage(text, 3000)
+        except Exception:
+            pass
+
+    def _flash_added(self, edit: QLineEdit, text: str):
+        """Delikatne, jasne podświetlenie pola + tooltip, gdy wartość zostanie dodana do słownika."""
+        bg = "#f8fafc" if _is_light else "#4b5568"
+        border = "#cbd5e1" if _is_light else "#6b7688"
+        text_color = "#0f172a" if _is_light else _TEXT
+        edit.setStyleSheet(
+            f"background:{bg}; border:1px solid {border}; border-radius:3px;"
+            f"color:{text_color}; font-size:9pt; padding:2px 6px;"
+        )
+        QTimer.singleShot(150, lambda: edit.setStyleSheet(_INPUT_STYLE))
+        QToolTip.showText(edit.mapToGlobal(edit.rect().bottomLeft()), text, edit, edit.rect(), 1000)
+        self._show_status(text)
+
     def _copy_and_flash(self, edit: QLineEdit):
         text = edit.text().strip()
         if not text:
@@ -925,7 +967,7 @@ class MontazTab(QWidget):
     @Slot(str)
     def _on_ccid_changed(self, text: str):
         ccid = text.strip()
-        if len(ccid) >= 15 and not self._sim_edit.text().strip():
+        if len(ccid) >= 15:
             sim = self._db.get_sim_by_ccid(ccid)
             if sim:
                 self._sim_edit.setText(sim)
@@ -956,7 +998,7 @@ class MontazTab(QWidget):
     @Slot(str)
     def _format_plate(self, text: str):
         if not self._plate_format_cb.isChecked():
-            clean = text.upper().replace(" ", "")
+            clean = ''.join(text.split()).upper()
             if text != clean:
                 self._plate_edit.blockSignals(True)
                 cursor = self._plate_edit.cursorPosition()
@@ -968,7 +1010,7 @@ class MontazTab(QWidget):
     @Slot(str)
     def _format_id(self, text: str):
         if not self._id_format_cb.isChecked():
-            clean = text.upper().replace(" ", "")
+            clean = ''.join(text.split()).upper()
             if text != clean:
                 self._device_id_edit.blockSignals(True)
                 cursor = self._device_id_edit.cursorPosition()
@@ -980,7 +1022,7 @@ class MontazTab(QWidget):
     @Slot(str)
     def _format_przek(self, text: str):
         if not self._przek_format_cb.isChecked():
-            clean = text.upper().replace(" ", "")
+            clean = ''.join(text.split()).upper()
             if text != clean:
                 self._przek_rej_edit.blockSignals(True)
                 cursor = self._przek_rej_edit.cursorPosition()
@@ -1005,19 +1047,20 @@ class MontazTab(QWidget):
         self._add_dropdown_action(self._vehicle_type_combo, vt_comp)
 
         tech_names = self._db.get_technician_names()
-        t_comp = QCompleter(tech_names, self)
-        t_comp.setCaseSensitivity(Qt.CaseInsensitive)
-        t_comp.setFilterMode(Qt.MatchContains)
-        self._technician_combo.setCompleter(t_comp)
-        self._add_dropdown_action(self._technician_combo, t_comp)
+        self._tech_comp = QCompleter(tech_names, self)
+        self._tech_comp.setCaseSensitivity(Qt.CaseInsensitive)
+        self._tech_comp.setFilterMode(Qt.MatchContains)
+        self._technician_combo.setCompleter(self._tech_comp)
+        self._add_dropdown_action(self._technician_combo, self._tech_comp)
 
-        loki = [loc for _, loc in self._db.get_all_recorder_locations() if loc]
-        if loki:
-            l_comp = QCompleter(sorted(list(set(loki))), self)
-            l_comp.setCaseSensitivity(Qt.CaseInsensitive)
-            l_comp.setFilterMode(Qt.MatchContains)
-            self._recorder_loc_edit.setCompleter(l_comp)
-            self._add_dropdown_action(self._recorder_loc_edit, l_comp)
+        loki = sorted({loc for _, loc in self._db.get_all_recorder_locations() if loc}, key=str.lower)
+        self._loc_comp = QCompleter(loki, self)
+        self._loc_comp.setCaseSensitivity(Qt.CaseInsensitive)
+        self._loc_comp.setFilterMode(Qt.MatchContains)
+        self._recorder_loc_edit.setCompleter(self._loc_comp)
+        self._add_dropdown_action(self._recorder_loc_edit, self._loc_comp)
+        self._add_dict_button(self._recorder_loc_edit, "Dodaj lokalizację do słownika",
+                               self._on_add_location_to_dict)
 
         try:
             companies_fleets = set()
@@ -1061,13 +1104,14 @@ class MontazTab(QWidget):
                 c_comp.activated.connect(self._on_company_activated)
                 self._add_dropdown_action(self._company_edit, c_comp)
 
-            if brands_types:
-                b_comp = QCompleter(sorted(list(brands_types)), self)
-                b_comp.setCaseSensitivity(Qt.CaseInsensitive)
-                b_comp.setFilterMode(Qt.MatchContains)
-                self._brand_edit.setCompleter(b_comp)
-                b_comp.activated.connect(self._on_brand_activated)
-                self._add_dropdown_action(self._brand_edit, b_comp)
+            self._brand_comp = QCompleter(sorted(brands_types), self)
+            self._brand_comp.setCaseSensitivity(Qt.CaseInsensitive)
+            self._brand_comp.setFilterMode(Qt.MatchContains)
+            self._brand_edit.setCompleter(self._brand_comp)
+            self._brand_comp.activated.connect(self._on_brand_activated)
+            self._add_dropdown_action(self._brand_edit, self._brand_comp)
+            self._add_dict_button(self._brand_edit, "Dodaj markę/model + typ do słownika pojazdów",
+                                   self._on_add_vehicle_to_dict)
 
         except Exception as exc:
             logger.error(f"Nie udało się załadować podpowiedzi: {exc}")
@@ -1093,6 +1137,50 @@ class MontazTab(QWidget):
     def _set_brand_type(self, brand: str, vtype: str):
         self._brand_edit.setText(brand)
         self._vehicle_type_combo.setText(vtype)
+
+    def _on_add_location_to_dict(self):
+        loc = self._recorder_loc_edit.text().strip()
+        if not loc:
+            return
+        existing = [l for _, l in self._db.get_all_recorder_locations()]
+        if any(loc.lower() == e.lower() for e in existing):
+            self._show_status(f"Lokalizacja '{loc}' już jest w słowniku.")
+            return
+        self._db.upsert_recorder_location(loc)
+        self._db.commit()
+        updated = sorted({l for _, l in self._db.get_all_recorder_locations() if l}, key=str.lower)
+        self._loc_comp.model().setStringList(updated)
+        self._flash_added(self._recorder_loc_edit, f"Dodano lokalizację '{loc}' do słownika.")
+
+    def _on_add_vehicle_to_dict(self):
+        brand = self._brand_edit.text().strip()
+        vtype = self._vehicle_type_combo.text().strip()
+        if not brand:
+            return
+        if not vtype:
+            self._show_status("Wybierz typ pojazdu, aby dodać wpis do słownika.")
+            return
+        cursor = self._db._conn.cursor()
+        cursor.execute(
+            "SELECT vehicle_type FROM vehicle_models WHERE brand_model = ? COLLATE NOCASE",
+            (brand,),
+        )
+        row = cursor.fetchone()
+        if row and (row[0] or "").strip().lower() == vtype.lower():
+            self._show_status(f"'{brand}' ({vtype}) już jest w słowniku pojazdów.")
+            return
+        self._db.upsert_vehicle_model(brand, vtype)
+        self._db.commit()
+
+        cursor.execute("SELECT brand_model, vehicle_type FROM vehicle_models")
+        brands_types = set()
+        for r in cursor.fetchall():
+            b = str(r[0] or "").strip()
+            t = str(r[1] or "").strip()
+            if b:
+                brands_types.add(f"{b} ({t})" if t else b)
+        self._brand_comp.model().setStringList(sorted(brands_types))
+        self._flash_added(self._brand_edit, f"Dodano '{brand}' ({vtype}) do słownika pojazdów.")
 
     def _make_din_func_edit(self) -> tuple:
         edit = CustomLineEdit()
@@ -1257,7 +1345,8 @@ class MontazTab(QWidget):
         conn = CAN_CONNECTION_TRUCK if self._can_truck_rb.isChecked() else \
                CAN_CONNECTION_CAR   if self._can_car_rb.isChecked() else ""
         can_cfg = {"isCan": "true" if self._can_active_cb.isChecked() else "",
-                   "canConnection": conn}
+                   "canConnection": conn,
+                   "tankCapacity": self._tank_capacity_edit.text().strip()}
         for i, key in enumerate(CAN_JSON_KEYS):
             cb = self._can_cbs[i]
             can_cfg[key] = "tak" if (cb and cb.isChecked()) else ""
@@ -1424,6 +1513,7 @@ class MontazTab(QWidget):
             conn = can_cfg.get("canConnection","")
             if conn==CAN_CONNECTION_TRUCK: self._can_truck_rb.setChecked(True)
             elif conn==CAN_CONNECTION_CAR: self._can_car_rb.setChecked(True)
+            self._tank_capacity_edit.setText(can_cfg.get("tankCapacity",""))
             for i, key in enumerate(CAN_JSON_KEYS):
                 cb = self._can_cbs[i]
                 if cb: cb.setChecked(can_cfg.get(key,"")=="tak")
