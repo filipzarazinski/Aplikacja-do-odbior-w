@@ -78,12 +78,26 @@ class ServiceForm(QDialog):
             title = "Nowy wpis"
         self.setWindowTitle(title)
         self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
-        self.setMinimumSize(FORM_WIDTH, FORM_HEIGHT)
+
+        # Nie wymuszamy rozmiaru większego niż dostępny obszar ekranu - na mniejszych
+        # ekranach (np. laptopy 1366x768) sztywne FORM_WIDTH/FORM_HEIGHT wystawały poza
+        # ekran i część formularza (zwykle dół) była niewidoczna, niezależnie od skalowania.
+        screen = self.screen() or QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else None
+        min_w = min(FORM_WIDTH, avail.width()) if avail else FORM_WIDTH
+        min_h = min(FORM_HEIGHT, avail.height()) if avail else FORM_HEIGHT
+        self.setMinimumSize(min_w, min_h)
+
         QShortcut(QKeySequence("Ctrl+W"), self, activated=self.reject)
         settings = QSettings("TwojaFirma", "SystemOdbiory")
         w = settings.value("form/width", FORM_WIDTH, type=int)
         h = settings.value("form/height", FORM_HEIGHT, type=int)
+        if avail:
+            w = min(w, avail.width())
+            h = min(h, avail.height())
         self.resize(w, h)
+        if avail:
+            self.move(avail.center().x() - w // 2, avail.center().y() - h // 2)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)

@@ -2,6 +2,19 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.4",
+        "date": "2026-08-04",
+        "entries": [
+            ("Ustawienia", [
+                "Nowy eksport wszystkich słowników do Excela",
+            ]),
+            ("Formularz", [
+                "Poprawiony rozmiar/pozycja okna na mniejszych ekranach",
+                "Poprawki przycisków Flota/Panel",
+            ]),
+        ],
+    },
+    {
         "version": "1.2.3",
         "date": "2026-07-31",
         "entries": [

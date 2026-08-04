@@ -1202,9 +1202,13 @@ class SettingsWindow(QDialog):
         btn_import = QPushButton("📥  Importuj wszystkie arkusze")
         btn_import.setObjectName("btn_primary")
         btn_import.clicked.connect(self._on_bulk_import)
+        btn_export = QPushButton("📤  Eksportuj wszystkie słowniki")
+        btn_export.setToolTip("Zapisuje wszystkie słowniki do jednego pliku Excel w tym samym formacie, jaki obsługuje import")
+        btn_export.clicked.connect(self._on_bulk_export)
         btn_refresh = QPushButton("🔄  Odśwież słowniki")
         btn_refresh.clicked.connect(self._on_refresh_all)
         btn_row.addWidget(btn_import, 1)
+        btn_row.addWidget(btn_export, 1)
         btn_row.addWidget(btn_refresh)
         lay.addLayout(btn_row)
 
@@ -1323,6 +1327,88 @@ class SettingsWindow(QDialog):
             self, "Import zakończony",
             f"Zaimportowano łącznie {total} rekordów."
         )
+
+    def _on_bulk_export(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Zapisz eksport słowników", "Slowniki_export.xlsx",
+            "Plik Excel (*.xlsx)"
+        )
+        if not path:
+            return
+
+        try:
+            import openpyxl
+        except ImportError:
+            QMessageBox.warning(self, "Brak biblioteki", "Uruchom: pip install openpyxl")
+            return
+
+        db = self._db
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+
+        def write_pivot(sheet_name: str, pairs: list[tuple[str, str]]):
+            """Kolumny = floty (nagłówek), wiersze = wartości przypisane do danej floty."""
+            ws = wb.create_sheet(sheet_name)
+            fleets = sorted({fleet for _, fleet in pairs if fleet}, key=str.lower)
+            columns: dict[str, list[str]] = {f: [] for f in fleets}
+            for value, fleet in pairs:
+                if value and fleet in columns:
+                    columns[fleet].append(value)
+            for col_idx, fleet in enumerate(fleets, start=1):
+                ws.cell(row=1, column=col_idx, value=fleet)
+            max_len = max((len(v) for v in columns.values()), default=0)
+            for row_idx in range(max_len):
+                for col_idx, fleet in enumerate(fleets, start=1):
+                    vals = columns[fleet]
+                    if row_idx < len(vals):
+                        ws.cell(row=row_idx + 2, column=col_idx, value=vals[row_idx])
+
+        def write_list(sheet_name: str, values: list[str]):
+            ws = wb.create_sheet(sheet_name)
+            for row_idx, v in enumerate(values, start=1):
+                ws.cell(row=row_idx, column=1, value=v)
+
+        def write_table(sheet_name: str, rows: list[tuple]):
+            ws = wb.create_sheet(sheet_name)
+            for row_idx, row_vals in enumerate(rows, start=1):
+                for col_idx, v in enumerate(row_vals, start=1):
+                    ws.cell(row=row_idx, column=col_idx, value=v)
+
+        skipped_no_fleet = 0
+
+        companies = db.get_all_companies_with_fleet()  # [(id, name, fleet_name)]
+        skipped_no_fleet += sum(1 for _, _, fleet in companies if not fleet)
+        write_pivot("Firmy", [(name, fleet) for _, name, fleet in companies if fleet])
+
+        links = db.get_all_fleet_links()  # [(id, fleet_name, url)]
+        ws_linki = wb.create_sheet("Linki")
+        for col_idx, (_, fleet, url) in enumerate(links, start=1):
+            ws_linki.cell(row=1, column=col_idx, value=fleet)
+            ws_linki.cell(row=2, column=col_idx, value=url)
+
+        write_list("Monterzy", [t.full_name for t in db.get_all_technicians(active_only=False)])
+        write_list("GdzieRejestrator", [loc for _, loc in db.get_all_recorder_locations()])
+        write_table("Model_Typ", [(brand, vtype) for _, brand, vtype in db.get_all_vehicle_models()])
+
+        extra = db.get_all_extra_devices()  # [(id, fleet_name, device_name)]
+        skipped_no_fleet += sum(1 for _, fleet, _ in extra if not fleet)
+        write_pivot("UrzadzeniaDodatkowe", [(device, fleet) for _, fleet, device in extra if fleet])
+
+        write_list("ModelUrzadzenia", [name for _, name in db.get_all_device_models()])
+
+        try:
+            wb.save(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd zapisu", str(e))
+            return
+
+        msg = f"Zapisano plik:\n{path}"
+        if skipped_no_fleet:
+            msg += (
+                f"\n\nPominięto {skipped_no_fleet} wpis(ów) bez przypisanej floty "
+                "(ten format pliku wymaga floty jako nagłówka kolumny)."
+            )
+        QMessageBox.information(self, "Eksport zakończony", msg)
 
     # ---------------------------------------------------------------- Import Odbiory tab
 
