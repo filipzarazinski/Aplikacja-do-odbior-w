@@ -2,6 +2,32 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.5",
+        "date": "2026-08-05",
+        "entries": [
+            ("Podgrywanie Dallas (nowość)", [
+                "WERSJA WSTĘPNA - korzystać uważnie, na spokojnie weryfikować wyniki; w razie pytań o działanie funkcjonalności pisać do FZA",
+                "Nowe okno 'Podgrywanie Dallas' (przycisk na toolbarze, prawy górny róg) - dwie zakładki: 'Dopasowanie z serwerem' i 'Kalkulator 01 / AD'. Okno otwiera się jako osobna, niezależna instancja - można mieć kilka naraz",
+                "--- Zakładka 'Dopasowanie z serwerem' - jak korzystać ---",
+                "1. Kliknij 'Wybierz załącznik (lista pojazdów)' i wskaż plik Excel z listą pojazdów firmy (xlsx/xls) - format kolumn wykrywany automatycznie, działa dla różnych układów (PGE, Tauron)",
+                "2. Kliknij 'Wybierz eksport z serwera' i wskaż plik CSV z eksportem urządzeń z panelu.",
+                "3. Pojazdy dopasowują się automatycznie po ID rejestratora / Imei - tabela pokazuje SIM, Firmware, CCRC, Firmware status, Ostatnią datę GPS, DALLAS i Datę błędu wysyłania listy",
+                "4. Wpisz w polu 'Aktualna text' i/lub 'Aktualna binary' poprawny numer CCRC, który jest aktualny, będzie aktualnie podgrywany (rozpoznanie po firmware: 4.002/4.003 = binary, reszta = text) - dopasowane wiersze podświetlają się na zielono automatycznie",
+                "5. Czerwona komórka Firmware status (255) albo Data błędu wysyłania listy oznacza problem na tym urządzeniu, nawet w zielonym (podegranym) wierszu",
+                "6. Możesz później wczytać nowszy eksport z serwera (np. po zaktualizowaniu CCRC) bez ponownego wczytywania załącznika - dopasowanie i procent podegranych odświeżą się automatycznie",
+                "7. Wyszukiwarka wspiera filtrowanie po kolumnie ('kolumna:tekst') i wykluczanie ('kolumna:!tekst'); przyciski 'Pokaż same binary/text', 'Ukryj podegrane' i 'Ukryj bez ID rejestratora' filtrują tabelę; klik w Nr rejestracyjny/ID/SIM/CCRC kopiuje wartość do schowka",
+                "8. Zaznacz wiersze i kliknij 'Generuj SIM do CSV' (prawy dolny róg) - zapisuje numery SIM zaznaczonych pojazdów do pliku CSV (domyślnie 'import_sim.csv') w formacie gotowym do importu, z automatyczną normalizacją numeru (+48XXXXXXXXX)",
+                "9. Prawy klik na zaznaczonych wierszach: 'Przejdź do panelu {flota}' i 'Wyślij listę' korzystają z linku 'Panel - {flota} (zadania)' ze słownika Linki flot; 'Wyślij listę' automatycznie tworzy zadanie wgrania listy w panelu (wymaga zaktualizowanego skryptu Tampermonkey 'Ponowne wgranie listy DALLAS' - wersja 1.6+); dla Tauron zadania są tworzone pojedynczo na urządzenie (tymczasowe obejście problemu z filtrowaniem w tym panelu)",
+                "WAŻNE: aby 'Przejdź do panelu' i 'Wyślij listę' działały, trzeba zaimportować (zaktualizowane) linki z pliku 'Baza danych' - Ustawienia -> Słowniki -> Linki flot -> Importuj z Excel. Bez wpisów 'Panel - PGE (zadania)' / 'Panel - TAURON (zadania)' te przyciski będą wyszarzone",
+                "Zakładka 'Kalkulator 01 / AD' - wklej jedną lub wiele kart Dallas (16 znaków hex, jedna w wierszu) i przelicz wszystkie na rodzinę 01 albo AD jednym kliknięciem",
+                "Żadne dane wpisane w tym oknie nie są zapisywane do bazy - żyją tylko, dopóki okno jest otwarte",
+            ]),
+            ("Inne", [
+                "Standardowe przyciski systemowe (Tak/Nie/OK/Anuluj w oknach potwierdzeń) są teraz poprawnie po polsku, nie po angielsku",
+            ]),
+        ],
+    },
+    {
         "version": "1.2.4",
         "date": "2026-08-04",
         "entries": [

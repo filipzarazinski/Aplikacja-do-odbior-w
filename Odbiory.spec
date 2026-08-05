@@ -1,5 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+import PySide6
+
+_qt_pl_translation = os.path.join(os.path.dirname(PySide6.__file__), 'translations', 'qtbase_pl.qm')
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -9,10 +14,12 @@ a = Analysis(
         ('logo.png', '.'),
         ('favicon.ico', '.'),
         ('database/migrations/*.sql', 'database/migrations'),
+        (_qt_pl_translation, 'PySide6/translations'),
     ],
     hiddenimports=[
         'pyxlsb',
         'openpyxl',
+        'xlrd',
         'requests',
         'PySide6.QtSvg',
         'PySide6.QtXml',

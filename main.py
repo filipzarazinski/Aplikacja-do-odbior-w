@@ -13,7 +13,7 @@ if sys.platform == "win32" and getattr(sys, "frozen", False):
     _sp.Popen.__init__ = _popen_no_console
 
 from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QTranslator, QLocale, QLibraryInfo
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
@@ -181,6 +181,22 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
+
+    # Wczytanie polskiego tłumaczenia Qt - inaczej standardowe przyciski (Tak/Nie/OK/Anuluj
+    # w QMessageBox.question itp.) wyświetlają się po angielsku, mimo że resztę UI mamy w PL.
+    _qt_translator = QTranslator(app)
+    _qt_tr_loaded = _qt_translator.load(
+        QLocale("pl_PL"), "qtbase", "_", QLibraryInfo.path(QLibraryInfo.TranslationsPath)
+    )
+    if not _qt_tr_loaded:
+        # Fallback dla wersji zbudowanej PyInstallerem - plik dołączony obok exe (patrz Odbiory.spec)
+        _qt_tr_loaded = _qt_translator.load(
+            QLocale("pl_PL"), "qtbase", "_", str(BASE_DIR / "PySide6" / "translations")
+        )
+    if _qt_tr_loaded:
+        app.installTranslator(_qt_translator)
+    else:
+        logger.warning("Nie udało się wczytać polskiego tłumaczenia Qt (qtbase_pl.qm)")
 
     _INSTANCE_KEY = "Odbiory_SingleInstance"
     _sock = QLocalSocket()

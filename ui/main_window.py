@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QStatusBar, QToolBar, QMessageBox, QMenu,
     QDateEdit, QFrame, QAbstractItemView, QApplication,
     QStyledItemDelegate, QStyleOptionViewItem, QStyle,
-    QDialog, QListWidget, QListWidgetItem,
+    QDialog, QListWidget, QListWidgetItem, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint, QUrl, QRect, Signal
 from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QDesktopServices, QPen, QPainter, QFont
@@ -778,6 +778,15 @@ class MainWindow(QMainWindow):
         self._act_settings.setShortcut(QKeySequence("Ctrl+K"))
         tb.addAction(self._act_settings)
 
+        # Rozciągliwy spacer - wszystko dodane po nim ląduje w prawym rogu toolbara.
+        _tb_spacer = QWidget(self)
+        _tb_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tb.addWidget(_tb_spacer)
+
+        self._act_card_converter = QAction("🔢  Podgrywanie Dallas", self)
+        self._act_card_converter.setToolTip("Przelicznik kart Dallas (01 <-> AD) i dopasowanie z eksportem serwera")
+        tb.addAction(self._act_card_converter)
+
     def _build_filter_bar(self) -> QWidget:
         bar = QWidget(self)
         bar.setObjectName("filter_bar")
@@ -1177,6 +1186,7 @@ class MainWindow(QMainWindow):
         self._act_delete.triggered.connect(self._on_delete)
         self._act_refresh.triggered.connect(self._on_filter)
         self._act_settings.triggered.connect(self._on_open_settings)
+        self._act_card_converter.triggered.connect(self._on_open_card_converter)
 
         self._btn_duplicate_row.clicked.connect(self._on_duplicate_row)
         self._btn_filter.clicked.connect(self._on_filter)
@@ -1826,6 +1836,24 @@ class MainWindow(QMainWindow):
 
         self._refresh_quick_filters()
         self._on_filter()
+
+    def _on_open_card_converter(self):
+        # Każde kliknięcie otwiera nową, niezależną instancję okna - to NIE jest
+        # singleton reużywany między wywołaniami. Można mieć kilka otwartych naraz
+        # i zamknięcie jednego nie wpływa na inne.
+        # WAŻNE: bez parenta (self) - na Windows okno z ustawionym parentem jest
+        # traktowane jako "owned" przez okno główne, więc zminimalizowanie go
+        # minimalizowało też okno główne. Bez parenta żyje w pełni niezależnie
+        # (własny wpis na pasku zadań), a Python-referencję trzymamy w liście,
+        # żeby obiekt nie został zwolniony przez GC.
+        from ui.dallas_tool_dialog import DallasToolDialog
+        if not hasattr(self, "_dallas_windows"):
+            self._dallas_windows = []
+        dlg = DallasToolDialog()
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg.destroyed.connect(lambda: self._dallas_windows.remove(dlg) if dlg in self._dallas_windows else None)
+        self._dallas_windows.append(dlg)
+        dlg.show()
 
     @Slot(set, list)
     def _on_columns_changed(self, visible: set, order: list):

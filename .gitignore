@@ -26,3 +26,13 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# Dane wrażliwe klientów (numery SIM, IMEI, nr rejestracyjne, dane osobowe) -
+# pliki testowe/robocze do funkcji "Podgrywanie Dallas", nigdy nie commitować.
+OBD.csv
+pge.csv
+tauron.csv
+test.csv
+*.xlsx
+*.xls
+*.xlsm
