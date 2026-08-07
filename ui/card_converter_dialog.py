@@ -57,6 +57,20 @@ def convert_card(card_hex: str, new_suffix: str) -> str:
     return f"{crc:02X}00{serial}{new_suffix}"
 
 
+def _wrap_lines(text: str, tag: str) -> str:
+    """Owija każdą niepustą linię w <tag>...</tag> (np. karta -> <binary>karta</binary>).
+    Zdejmuje istniejące tagi <text>/<binary>, żeby kolejne kliknięcie nie zagnieżdżało ich ponownie."""
+    result = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            result.append(line)
+            continue
+        inner = re.sub(r"^<(?:text|binary)>|</(?:text|binary)>$", "", stripped, flags=re.IGNORECASE)
+        result.append(f"<{tag}>{inner}</{tag}>")
+    return "\n".join(result)
+
+
 class CardConverterWidget(QWidget):
     """Widget przelicznika numerów kart Dallas (np. 01 <-> AD). Bez stanu w bazie."""
 
@@ -113,16 +127,24 @@ class CardConverterWidget(QWidget):
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(1, 1)
 
-        grid.addWidget(QLabel("Karty wejściowe"), 0, 0)
+        in_head = QHBoxLayout()
+        in_head.setSpacing(8)
+        in_head.addWidget(QLabel("Karty wejściowe"))
+        in_head.addStretch()
+        self._btn_copy_input = QPushButton("Kopiuj")
+        self._btn_copy_input.setStyleSheet(link_btn_style)
+        self._btn_copy_input.setCursor(Qt.PointingHandCursor)
+        in_head.addWidget(self._btn_copy_input)
+        grid.addLayout(in_head, 0, 0)
 
         out_head = QHBoxLayout()
         out_head.setSpacing(8)
         out_head.addWidget(QLabel("Wynik"))
         out_head.addStretch()
-        self._btn_copy = QPushButton("Kopiuj")
-        self._btn_copy.setStyleSheet(link_btn_style)
-        self._btn_copy.setCursor(Qt.PointingHandCursor)
-        out_head.addWidget(self._btn_copy)
+        self._btn_copy_output = QPushButton("Kopiuj")
+        self._btn_copy_output.setStyleSheet(link_btn_style)
+        self._btn_copy_output.setCursor(Qt.PointingHandCursor)
+        out_head.addWidget(self._btn_copy_output)
         grid.addLayout(out_head, 0, 1)
 
         self._input_edit = QPlainTextEdit()
@@ -149,6 +171,12 @@ class CardConverterWidget(QWidget):
         self._btn_to_ad.setStyleSheet(btn_style)
         btn_row.addWidget(self._btn_to_01)
         btn_row.addWidget(self._btn_to_ad)
+        self._btn_format_text = QPushButton("Zapisz w formacie <text>")
+        self._btn_format_text.setStyleSheet(btn_style)
+        self._btn_format_binary = QPushButton("Zapisz w formacie <binary>")
+        self._btn_format_binary.setStyleSheet(btn_style)
+        btn_row.addWidget(self._btn_format_text)
+        btn_row.addWidget(self._btn_format_binary)
         btn_row.addStretch()
         self._summary_lbl = QLabel(" ")
         self._summary_lbl.setStyleSheet(f"color:{muted}; font-size:8pt;")
@@ -157,7 +185,17 @@ class CardConverterWidget(QWidget):
 
         self._btn_to_01.clicked.connect(lambda: self._convert_all("01"))
         self._btn_to_ad.clicked.connect(lambda: self._convert_all("AD"))
-        self._btn_copy.clicked.connect(self._copy_output)
+        self._btn_copy_input.clicked.connect(lambda: self._copy_edit(self._input_edit, self._btn_copy_input))
+        self._btn_copy_output.clicked.connect(lambda: self._copy_edit(self._output_edit, self._btn_copy_output))
+        self._btn_format_text.clicked.connect(lambda: self._apply_format("text"))
+        self._btn_format_binary.clicked.connect(lambda: self._apply_format("binary"))
+
+    def _apply_format(self, tag: str):
+        for edit in (self._input_edit, self._output_edit):
+            was_read_only = edit.isReadOnly()
+            edit.setReadOnly(False)
+            edit.setPlainText(_wrap_lines(edit.toPlainText(), tag))
+            edit.setReadOnly(was_read_only)
 
     def _convert_all(self, new_suffix: str):
         lines = self._input_edit.toPlainText().splitlines()
@@ -182,11 +220,11 @@ class CardConverterWidget(QWidget):
         else:
             self._summary_lbl.setText(f"Przeliczono {ok_count}" if ok_count else " ")
 
-    def _copy_output(self):
-        text = self._output_edit.toPlainText().strip()
+    def _copy_edit(self, edit: QPlainTextEdit, btn: QPushButton):
+        text = edit.toPlainText().strip()
         if not text:
             return
         QApplication.clipboard().setText(text)
-        orig = self._btn_copy.text()
-        self._btn_copy.setText("Skopiowano ✓")
-        QTimer.singleShot(1000, lambda: self._btn_copy.setText(orig))
+        orig = btn.text()
+        btn.setText("Skopiowano ✓")
+        QTimer.singleShot(1000, lambda: btn.setText(orig))

@@ -2,6 +2,17 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.6",
+        "date": "2026-08-07",
+        "entries": [
+            ("Podgrywanie Dallas", [
+                "Dodano przycisk 'Odznacz Skaut1'",
+                "Jeśli w kolumnie 'Data błędu wysyłania listy' jest wpisana data, wiersz nie podświetla się już na zielono nawet gdy CCRC się zgadza - takie urządzenie i tak wymaga ponownej wysyłki",
+                "Kalkulator 01 / AD: dodano przyciski do zapisu w formacie text i binary",
+            ]),
+        ],
+    },
+    {
         "version": "1.2.5",
         "date": "2026-08-05",
         "entries": [

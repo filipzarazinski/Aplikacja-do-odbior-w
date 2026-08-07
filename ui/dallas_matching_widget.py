@@ -129,6 +129,20 @@ def _firmware_category(firmware: str) -> str:
     return "binary" if fw.startswith(_BINARY_FW_PREFIXES) else "text"
 
 
+_SKAUT1_MAJOR_RE = re.compile(r"^\D*0*(\d+)(?:\.|$)")
+
+
+def _is_skaut1_firmware(firmware: str) -> bool:
+    """Firmware 1.XXX.XXX = Skaut1. UWAGA: 10.XXX.XXX (i 11., 12. itd.) to NIE Skaut1 -
+    dlatego sprawdzamy dokładnie pierwszy segment wersji (liczbowo, ignorując ewentualny
+    tekstowy prefiks i wiodące zera), nie samo startswith('1')."""
+    fw = (firmware or "").strip()
+    if not fw:
+        return False
+    m = _SKAUT1_MAJOR_RE.match(fw)
+    return bool(m) and m.group(1) == "1"
+
+
 # TYMCZASOWE: na panelu Tauron filtrowanie rejestratora w kroku "Urządzenia" nie działa,
 # więc dla tej floty wysyłamy jedno zadanie na urządzenie po kolei, zamiast jednego
 # zadania z wieloma IMEI. Usunąć, gdy filtrowanie zostanie naprawione po stronie panelu.
@@ -326,6 +340,14 @@ class DallasMatchingWidget(QWidget):
         self._btn_hide_no_id.setStyleSheet(btn_style)
         self._btn_hide_no_id.setToolTip("Ukrywa wiersze bez ID rejestratora (np. pojazdy bez telemetrii) - i tak nie da się ich dopasować do serwera")
         search_row.addWidget(self._btn_hide_no_id)
+        self._btn_deselect_skaut1 = QPushButton("Odznacz Skaut1")
+        self._btn_deselect_skaut1.setCheckable(True)
+        self._btn_deselect_skaut1.setStyleSheet(btn_style)
+        self._btn_deselect_skaut1.setToolTip(
+            "Ukrywa w tabeli rejestratory z firmware 1.XXX.XXX (Skaut1) - "
+            "10.XXX.XXX to nie Skaut1 i pozostaje widoczne"
+        )
+        search_row.addWidget(self._btn_deselect_skaut1)
         self._info_lbl = QLabel("")
         self._info_lbl.setStyleSheet(f"color:{muted}; font-size:8pt;")
         search_row.addWidget(self._info_lbl)
@@ -374,6 +396,7 @@ class DallasMatchingWidget(QWidget):
         self._btn_hide_matched.toggled.connect(self._apply_filters)
         self._btn_hide_no_id.toggled.connect(self._apply_filters)
         self._btn_export_sim.clicked.connect(self._on_export_sim_csv)
+        self._btn_deselect_skaut1.toggled.connect(self._apply_filters)
         self._btn_show_binary.toggled.connect(self._on_show_binary_toggled)
         self._btn_show_text.toggled.connect(self._on_show_text_toggled)
 
@@ -500,6 +523,10 @@ class DallasMatchingWidget(QWidget):
     def _row_bg(self, row: dict):
         if not self._ccrc_check.isChecked():
             return None
+        # Zarejestrowany błąd wysyłania listy Dallas wyklucza zielony wiersz, nawet
+        # jeśli CCRC się zgadza - to urządzenie i tak wymaga uwagi/ponownej wysyłki.
+        if row.get("dallas_error_date"):
+            return None
         acceptable = self._acceptable_ccrc()
         if not acceptable:
             return None
@@ -621,6 +648,7 @@ class DallasMatchingWidget(QWidget):
 
         hide_matched = self._btn_hide_matched.isChecked()
         hide_no_id = self._btn_hide_no_id.isChecked()
+        hide_skaut1 = self._btn_deselect_skaut1.isChecked()
         fw_filter = "binary" if self._btn_show_binary.isChecked() else (
             "text" if self._btn_show_text.isChecked() else None
         )
@@ -635,7 +663,8 @@ class DallasMatchingWidget(QWidget):
             )
             fw_ok = fw_filter is None or _firmware_category(row.get("firmware")) == fw_filter
             no_id = hide_no_id and not row.get("device_id")
-            if not match_filters or not fw_ok or no_id or (hide_matched and self._is_matched(row)):
+            is_skaut1 = hide_skaut1 and _is_skaut1_firmware(row.get("firmware"))
+            if not match_filters or not fw_ok or no_id or is_skaut1 or (hide_matched and self._is_matched(row)):
                 self._table.setRowHidden(r, True)
                 continue
 
