@@ -2,6 +2,18 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.7",
+        "date": "2026-08-10",
+        "entries": [
+            ("Podgrywanie Dallas", [
+                "Poprawki rozpoznawania kolumn w różnych formatach załączników (inne floty niż PGE/Tauron)",
+                "Zmiany i poprawki w liczeniu 'podegranych' kart Dallas",
+                "Nowy przycisk 'Wyślij listę' i aktywne/wygaszone przyciski akcji w zależności od zaznaczenia",
+                "Drobne poprawki (nazwa zakładki, opisy, przyciski 'Gwiazdki sms')",
+            ]),
+        ],
+    },
+    {
         "version": "1.2.6",
         "date": "2026-08-07",
         "entries": [

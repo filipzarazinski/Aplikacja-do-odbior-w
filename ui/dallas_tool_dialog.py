@@ -45,6 +45,6 @@ class DallasToolDialog(QDialog):
 
         tabs = QTabWidget(self)
         tabs.setDocumentMode(True)
-        tabs.addTab(DallasMatchingWidget(), "  Dopasowanie z serwerem  ")
+        tabs.addTab(DallasMatchingWidget(), "  Podgrywka kart  ")
         tabs.addTab(CardConverterWidget(), "  Kalkulator 01 / AD  ")
         root.addWidget(tabs, 1)

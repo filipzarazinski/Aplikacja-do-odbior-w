@@ -36,10 +36,35 @@ def _normalize_sim(raw: str) -> str:
     return s
 
 
+_TOKEN_RE = re.compile(r"[^a-ząćęłńóśźż0-9]+")
+
+
+def _has_token(text: str, token: str) -> bool:
+    """Sprawdza czy `token` występuje jako samodzielne słowo w nagłówku, nie jako
+    fragment innego słowa (np. 'id' nie ma trafiać w 'widok')."""
+    return token in _TOKEN_RE.split(text)
+
+
+# Rozpoznawanie kolumn po nagłówku - lista wariantów nazw używanych w różnych
+# załącznikach (różne firmy/flotę nazywają te same kolumny inaczej). Dopisywanie
+# nowego wariantu tutaj wystarcza, żeby nowy format pliku zaczął się rozpoznawać
+# automatycznie - nie trzeba niczego zmieniać w resztcie kodu.
+_PLATE_HINTS = ("rejestracyjny", "rejestracja", "tablica rej")
+# UWAGA: samo "rejestrator" jako podstring jest zbyt szerokie - w załącznikach PGE/Tauron
+# jest kolumna "Rodzaj (marka, model) zamontowanego w pojeździe rejestratora" (model
+# urządzenia, nie ID!), która występuje PRZED właściwą kolumną "ID/Id rejestratora" i była
+# przez to błędnie łapana jako ID. "id" jako samodzielny token (patrz _has_token) już
+# poprawnie rozróżnia te dwie kolumny, więc "rejestrator" nie jest tu potrzebne.
+_DEVICE_ID_HINTS = ("imei", "numer seryjny", "nr seryjny", "s/n", "kod pojazdu")
+_SIM_HINTS = ("sim",)
+
+
 def _find_header_row(rows: list[list]) -> tuple[int, dict]:
     """Szuka wśród pierwszych ~25 wierszy tego, który wygląda jak nagłówek tabeli
     z kolumnami: nr rejestracyjny, ID rejestratora, nr karty SIM. Nie zakłada
-    konkretnego wiersza/kolumny - różni się to między załącznikami różnych firm.
+    konkretnego wiersza/kolumny/nazwy nagłówka - różni się to między załącznikami
+    różnych firm, więc rozpoznawanie opiera się na liście wariantów nazw kolumn
+    (patrz _PLATE_HINTS / _DEVICE_ID_HINTS / _SIM_HINTS).
     """
     best_idx, best_map, best_score = -1, {}, 0
     for i, row in enumerate(rows[:25]):
@@ -48,20 +73,20 @@ def _find_header_row(rows: list[list]) -> tuple[int, dict]:
             text = _norm(cell).lower()
             if not text:
                 continue
-            if "device_id" not in col_map and "rejestrator" in text and (
-                text.split()[0] == "id" or text.startswith("id ")
+            if "device_id" not in col_map and (
+                any(h in text for h in _DEVICE_ID_HINTS) or _has_token(text, "id")
             ):
                 col_map["device_id"] = c
-            if "plate" not in col_map and "rejestracyjny" in text:
+            if "plate" not in col_map and any(h in text for h in _PLATE_HINTS):
                 col_map["plate"] = c
-            if "sim" not in col_map and "sim" in text:
+            if "sim" not in col_map and any(h in text for h in _SIM_HINTS):
                 col_map["sim"] = c
         if len(col_map) > best_score:
             best_score, best_idx, best_map = len(col_map), i, col_map
     if best_score < 2:
         raise ValueError(
             "Nie rozpoznano formatu pliku - nie znaleziono kolumn 'Nr rejestracyjny', "
-            "'ID rejestratora' i 'Nr karty SIM'."
+            "'ID rejestratora' i 'Nr karty SIM' (ani ich rozpoznawanych wariantów nazw)."
         )
     return best_idx, best_map
 

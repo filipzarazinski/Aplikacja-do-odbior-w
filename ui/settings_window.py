@@ -77,6 +77,26 @@ class _ColCheckDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+# Rozpoznawanie kolumn Numer SIM / CCID po nagłówku - różne kartoteki nazywają
+# kolumnę z numerem SIM inaczej (np. "Numer SIM", ale też "Nr GSM"). Jeśli nie
+# znajdziemy nagłówka po nazwie, wracamy do domyślnych pozycji A/B (kolumna 0/1).
+_SIM_HEADER_HINTS = ("sim", "gsm")
+_CCID_HEADER_HINTS = ("ccid",)
+
+
+def _sim_ccid_columns(header_row: tuple) -> tuple[int, int]:
+    sim_idx = ccid_idx = None
+    for i, cell in enumerate(header_row):
+        text = str(cell or "").strip().lower()
+        if not text:
+            continue
+        if sim_idx is None and any(h in text for h in _SIM_HEADER_HINTS):
+            sim_idx = i
+        if ccid_idx is None and any(h in text for h in _CCID_HEADER_HINTS):
+            ccid_idx = i
+    return (sim_idx if sim_idx is not None else 0, ccid_idx if ccid_idx is not None else 1)
+
+
 # ── Worker thread do synchronizacji ───────────────────────────────────────────
 
 class SyncWorker(QThread):
@@ -148,14 +168,20 @@ class SyncWorker(QThread):
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         ws = wb.active
         cards = []
+        sim_col, ccid_col = 0, 1
+
+        def get(row, idx):
+            return str(row[idx] or "").strip() if idx < len(row) else ""
+
         for i, row in enumerate(ws.iter_rows(values_only=True)):
             if i == 0:
                 # Sprawdź czy to nagłówek
                 first = str(row[0] or "").strip().lower()
                 if not first.lstrip("+").isdigit():
+                    sim_col, ccid_col = _sim_ccid_columns(row)
                     continue  # pomiń nagłówek
-            sim = str(row[0] or "").strip()
-            ccid = str(row[1] or "").strip()
+            sim = get(row, sim_col)
+            ccid = get(row, ccid_col)
             if sim and ccid and sim.lower() not in ("none", "sim", "numer sim"):
                 cards.append((sim, ccid))
         wb.close()
@@ -730,13 +756,15 @@ class SettingsWindow(QDialog):
         # ── Panel dolny: tabela kart SIM ────────────────────────────────────
         def _sim_excel_parser(ws):
             result = []
+            sim_col, ccid_col = 0, 1
             for i, row in enumerate(ws.iter_rows(values_only=True)):
                 if i == 0:
                     first = str(row[0] or "").strip().lower()
                     if not first.lstrip("+").isdigit():
+                        sim_col, ccid_col = _sim_ccid_columns(row)
                         continue
-                sim  = str(row[0] or "").strip()
-                ccid = str(row[1] or "").strip() if len(row) > 1 else ""
+                sim  = str(row[sim_col] or "").strip() if sim_col < len(row) else ""
+                ccid = str(row[ccid_col] or "").strip() if ccid_col < len(row) else ""
                 if sim and ccid and sim.lower() not in ("none", "sim"):
                     result.append([sim, ccid])
             return result

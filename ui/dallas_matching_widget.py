@@ -11,6 +11,7 @@ import json
 import os
 import re
 import urllib.parse
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QCheckBox,
@@ -26,6 +27,18 @@ from ui.dallas_import import parse_attachment, parse_server_export, build_matche
 from ui.main_window import FilterableHeaderView, ColumnFilterPopup
 
 _DEFAULT_PANEL_KEY = "Panel - GPS"
+_STARS_SMS_TEXT = "PIN= DALLS=**************** RESTART"
+_CLEAR_STARS_SMS_TEXT = "PIN= DALLAS= RESTART"
+
+
+def _file_mtime_label(path: str) -> str:
+    """Data modyfikacji pliku (kiedy został zapisany/wyeksportowany) - żeby było
+    widać w aplikacji, czy wczytany eksport nie jest przypadkiem nieaktualny."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return ""
+    return datetime.fromtimestamp(mtime).strftime("%d.%m.%Y %H:%M")
 
 
 _FLASH_ROLE = Qt.UserRole + 3  # ta sama konwencja co RowColorDelegate w tabeli głównej
@@ -192,12 +205,17 @@ class DallasMatchingWidget(QWidget):
         border = "#cbd5e1" if is_light else "#3a4150"
         text = "#0f172a" if is_light else "#e2e8f0"
         muted = "#64748b" if is_light else "#94a3b8"
+        btn_disabled_bg = "#f1f5f9" if is_light else "#1e2229"
+        btn_disabled_text = "#94a3b8" if is_light else "#3a4150"
+        btn_disabled_border = "#cbd5e1" if is_light else "#252930"
         btn_style = (
             f"QPushButton{{background:{panel};color:{text};border:1px solid {border};"
             f"border-radius:3px;font-size:8pt;font-weight:600;padding:3px 9px;}}"
             f"QPushButton:hover{{border-color:#3b82f6;color:#3b82f6;}}"
             f"QPushButton:checked{{background:#3b82f6;color:#ffffff;border-color:#2563eb;}}"
             f"QPushButton:checked:hover{{background:#2563eb;color:#ffffff;}}"
+            f"QPushButton:disabled{{background:{btn_disabled_bg};color:{btn_disabled_text};"
+            f"border-color:{btn_disabled_border};}}"
         )
         input_style = (
             f"QLineEdit{{background:{panel};color:{text};border:1px solid {border};"
@@ -371,6 +389,7 @@ class DallasMatchingWidget(QWidget):
         self._table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
         self._table.cellClicked.connect(self._on_cell_clicked)
+        self._table.itemSelectionChanged.connect(self._update_action_buttons)
         root.addWidget(self._table, 1)
 
         bottom_row = QHBoxLayout()
@@ -379,12 +398,26 @@ class DallasMatchingWidget(QWidget):
         self._summary_lbl.setWordWrap(True)
         self._summary_lbl.setStyleSheet(f"color:{text}; font-size:9pt; font-weight:600;")
         bottom_row.addWidget(self._summary_lbl, 1)
+        self._btn_stars_sms = QPushButton("⭐  Gwiazdki sms")
+        self._btn_stars_sms.setStyleSheet(btn_style)
+        self._btn_stars_sms.setToolTip(f"Kopiuje do schowka: {_STARS_SMS_TEXT}")
+        bottom_row.addWidget(self._btn_stars_sms, 0, Qt.AlignRight | Qt.AlignBottom)
+        self._btn_clear_stars_sms = QPushButton("🧹  Usuń gwiazdki sms")
+        self._btn_clear_stars_sms.setStyleSheet(btn_style)
+        self._btn_clear_stars_sms.setToolTip(f"Kopiuje do schowka: {_CLEAR_STARS_SMS_TEXT}")
+        bottom_row.addWidget(self._btn_clear_stars_sms, 0, Qt.AlignRight | Qt.AlignBottom)
         self._btn_export_sim = QPushButton("📄  Generuj SIM do CSV")
         self._btn_export_sim.setStyleSheet(btn_style)
         self._btn_export_sim.setToolTip(
-            "Zapisuje numery SIM zaznaczonych wierszy do pliku CSV w formacie OBD.csv (Name,Number)"
+            "Zapisuje numery SIM zaznaczonych wierszy do pliku CSV w formacie Name,Number"
         )
         bottom_row.addWidget(self._btn_export_sim, 0, Qt.AlignRight | Qt.AlignBottom)
+        self._btn_send_list = QPushButton("📤  Wyślij listę")
+        self._btn_send_list.setStyleSheet(btn_style)
+        self._btn_send_list.setToolTip(
+            "Wysyła listę dla zaznaczonych wierszy (tak jak 'Wyślij listę' w menu prawego klawisza)"
+        )
+        bottom_row.addWidget(self._btn_send_list, 0, Qt.AlignRight | Qt.AlignBottom)
         root.addLayout(bottom_row)
 
         self._btn_pick_attachment.clicked.connect(self._on_pick_attachment)
@@ -396,9 +429,13 @@ class DallasMatchingWidget(QWidget):
         self._btn_hide_matched.toggled.connect(self._apply_filters)
         self._btn_hide_no_id.toggled.connect(self._apply_filters)
         self._btn_export_sim.clicked.connect(self._on_export_sim_csv)
+        self._btn_send_list.clicked.connect(self._on_send_list_button)
+        self._btn_stars_sms.clicked.connect(self._on_copy_stars_sms)
+        self._btn_clear_stars_sms.clicked.connect(self._on_copy_clear_stars_sms)
         self._btn_deselect_skaut1.toggled.connect(self._apply_filters)
         self._btn_show_binary.toggled.connect(self._on_show_binary_toggled)
         self._btn_show_text.toggled.connect(self._on_show_text_toggled)
+        self._update_action_buttons()
 
     def _on_show_binary_toggled(self, checked: bool):
         if checked and self._btn_show_text.isChecked():
@@ -428,7 +465,8 @@ class DallasMatchingWidget(QWidget):
             QMessageBox.warning(self, "Brak danych", "Nie znaleziono żadnych pojazdów w tym pliku.")
             return
         self._attachment_rows = rows
-        self._lbl_attachment.setText(f"{os.path.basename(path)}  •  {len(rows)} pojazdów")
+        mtime_info = f"  •  plik z {mtime}" if (mtime := _file_mtime_label(path)) else ""
+        self._lbl_attachment.setText(f"{os.path.basename(path)}  •  {len(rows)} pojazdów{mtime_info}")
         self._try_match()
         self._save_session_state()
 
@@ -450,7 +488,8 @@ class DallasMatchingWidget(QWidget):
         self._server_map = server_map
         self._server_fleet = fleet
         fleet_info = f"  •  wczytano {fleet}" if fleet else "  •  flota nierozpoznana"
-        self._lbl_server.setText(f"{os.path.basename(path)}  •  {len(server_map)} urządzeń{fleet_info}")
+        mtime_info = f"  •  plik z {mtime}" if (mtime := _file_mtime_label(path)) else ""
+        self._lbl_server.setText(f"{os.path.basename(path)}  •  {len(server_map)} urządzeń{fleet_info}{mtime_info}")
         self._try_match()
         self._save_session_state()
 
@@ -506,6 +545,7 @@ class DallasMatchingWidget(QWidget):
         self._populate_table(rows)
         self._update_header_filter_indicators()
         self._update_summary(rows)
+        self._update_action_buttons()
 
     # ------------------------------------------------------------ tabela
 
@@ -519,6 +559,7 @@ class DallasMatchingWidget(QWidget):
         self._refresh_colors()
         _SESSION_STATE["ccrc_text"] = self._current_text_edit.text()
         _SESSION_STATE["ccrc_binary"] = self._current_binary_edit.text()
+        self._update_action_buttons()
 
     def _row_bg(self, row: dict):
         if not self._ccrc_check.isChecked():
@@ -610,6 +651,18 @@ class DallasMatchingWidget(QWidget):
 
         QTimer.singleShot(200, restore)
 
+    def _on_copy_stars_sms(self):
+        QApplication.clipboard().setText(_STARS_SMS_TEXT)
+        orig = self._btn_stars_sms.text()
+        self._btn_stars_sms.setText("Skopiowano ✓")
+        QTimer.singleShot(1000, lambda: self._btn_stars_sms.setText(orig))
+
+    def _on_copy_clear_stars_sms(self):
+        QApplication.clipboard().setText(_CLEAR_STARS_SMS_TEXT)
+        orig = self._btn_clear_stars_sms.text()
+        self._btn_clear_stars_sms.setText("Skopiowano ✓")
+        QTimer.singleShot(1000, lambda: self._btn_clear_stars_sms.setText(orig))
+
     def _update_summary(self, rows: list[dict]):
         total = len(rows)
         matched = sum(1 for r in rows if r["found"])
@@ -621,9 +674,14 @@ class DallasMatchingWidget(QWidget):
 
         acceptable = self._acceptable_ccrc()
         if self._ccrc_check.isChecked() and acceptable:
+            # Skauty1 nie liczą się jako podegrane (dla nich realnie nie ma wgrywania listy
+            # kart Dallas), więc odejmujemy je od całości - nie mają psuć ani liczyć się
+            # do procentu tych, które trzeba podegrać.
+            skaut1_found = sum(1 for r in rows if r["found"] and _is_skaut1_firmware(r.get("firmware")))
+            to_program = matched - skaut1_found
             programmed = sum(1 for r in rows if self._is_matched(r))
-            pct = round(100 * programmed / matched) if matched else 0
-            text += f"  •  podegrane: {programmed}/{matched} ({pct}%)"
+            pct = round(100 * programmed / to_program) if to_program else 0
+            text += f"  •  podegrane: {programmed}/{to_program} ({pct}%)"
 
         self._summary_lbl.setText(text)
 
@@ -818,6 +876,42 @@ class DallasMatchingWidget(QWidget):
 
         return True, next(iter(values))
 
+    def _on_send_list_button(self):
+        rows = self._selected_row_data()
+        ok, info = self._send_list_status(rows)
+        if not ok:
+            QMessageBox.information(self, "Nie można wysłać listy", info)
+            return
+        file_name = info
+        imeis = [r["device_id"] for r in rows]
+        self._send_list(imeis, file_name)
+
+    def _update_action_buttons(self):
+        """Przyciski 'Wyślij listę' i 'Generuj SIM do CSV' są aktywne tylko, gdy
+        zaznaczenie faktycznie kwalifikuje się do danej akcji - tooltip przy
+        wyszarzonym przycisku wyjaśnia dlaczego (widoczny też, gdy jest disabled)."""
+        rows = self._selected_row_data()
+
+        self._btn_export_sim.setEnabled(bool(rows))
+        self._btn_export_sim.setToolTip(
+            "Zapisuje numery SIM zaznaczonych wierszy do pliku CSV w formacie Name,Number"
+            if rows else "Zaznacz przynajmniej jeden wiersz."
+        )
+
+        ok, info = self._send_list_status(rows)
+        base_label = "📤  Wyślij listę"
+        if ok:
+            file_name = info
+            self._btn_send_list.setEnabled(True)
+            self._btn_send_list.setText(f"{base_label} „{file_name}”")
+            self._btn_send_list.setToolTip(
+                f"Wysyła listę „{file_name}” dla {len(rows)} zaznaczonych urządzeń"
+            )
+        else:
+            self._btn_send_list.setEnabled(False)
+            self._btn_send_list.setText(base_label)
+            self._btn_send_list.setToolTip(info)
+
     def _on_table_context_menu(self, pos: QPoint):
         if self._table.itemAt(pos) is None and not self._table.selectedItems():
             return
@@ -850,6 +944,10 @@ class DallasMatchingWidget(QWidget):
             act_send = menu.addAction("📤  Wyślij listę")
             act_send.setEnabled(False)
             act_send.setToolTip(info)
+
+        menu.addSeparator()
+        act_export_sim = menu.addAction("📄  Generuj SIM do CSV")
+        act_export_sim.triggered.connect(self._on_export_sim_csv)
 
         menu.exec(self._table.viewport().mapToGlobal(pos))
 
