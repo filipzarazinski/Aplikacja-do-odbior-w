@@ -15,12 +15,114 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Slot, QTimer, QSettings, QUrl, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QDesktopServices
 
-from config import FORM_WIDTH, FORM_HEIGHT
+from config import FORM_WIDTH, FORM_HEIGHT, KOMPENDIUM_ENABLED
 from database.db_manager import DatabaseManager
 from database.models import ServiceRecord
 from ui.widgets.montaz_tab import MontazTab
 
 logger = logging.getLogger(__name__)
+
+
+def _detect_brand_from_model(model_text: str) -> str:
+    """Zgaduje markę rejestratora z pola 'Model urządzenia' (np. 'Skaut 10 SMA' -> Setivo,
+    'FMC650' -> Teltonika) - do wstępnego filtrowania w oknie Kompendium/Komendy."""
+    t = (model_text or "").strip().lower()
+    if not t:
+        return ""
+    if "skaut" in t or "setivo" in t:
+        return "Setivo"
+    if "albatros" in t:
+        return "Albatros"
+    if "teltonika" in t or t.startswith("fm"):
+        return "Teltonika"
+    return ""
+
+
+def _tacho_brand_context(tab) -> str:
+    """Marka tachografu wynikająca z wybranej ścieżki D8 (Tachoreader/FMB640) i
+    zaznaczonego radiobuttona - do podbicia w wyszukiwarce Kompendium (np. artykuł
+    otagowany "stoneridge" trafi wyżej, jeśli monter zaznaczył Stoneridge)."""
+    d8 = tab._d8_combo.currentText().strip()
+    if d8 == "FMB640/FMC650":
+        for rb in (tab._rb_tel_s, tab._rb_tel_sr, tab._rb_tel_i):
+            if rb.isChecked():
+                return f"{rb.text()} Teltonika FMB640"
+        return "Teltonika FMB640"
+    if d8 == "Tachoreader":
+        for rb in (tab._rb_siemens, tab._rb_stonerige):
+            if rb.isChecked():
+                return rb.text()
+    return ""
+
+
+def _checked_typ_montazu(tab) -> str:
+    for name, rb in tab._typ_rbs.items():
+        if rb.isChecked():
+            return name
+    return ""
+
+
+def _can_driver_status_hint(tab) -> str:
+    """Jeśli monter zaznaczył CAN "Kierowca" lub "Statusy" - to bezpośredni sygnał
+    tematu D8/statusy kierowców (patrz CAN_CHECKBOX_LABELS: indeks 5=Kierowca,
+    6=Statusy)."""
+    hints = []
+    if len(tab._can_cbs) > 5 and tab._can_cbs[5].isChecked():
+        hints.append("kierowca")
+    if len(tab._can_cbs) > 6 and tab._can_cbs[6].isChecked():
+        hints.append("statusy")
+    return " ".join(hints)
+
+
+def _din_functions_text(tab) -> str:
+    """Opisy funkcji podpiętych pod DINy (np. "zabezpieczenie", "wlew") - wolny tekst
+    wpisany przez montera, nie identyfikator."""
+    return " ".join(
+        row["func"].text().strip() for row in tab._din_rows if row["func"].text().strip()
+    )
+
+
+def _absent_hardware_tags(tab) -> set:
+    """Sprzęt, którego na pewno NIE ma w tym montażu (checkbox jawnie odznaczony) -
+    do tłumienia w wyszukiwarce Kompendium artykułów o tym sprzęcie (np. RFID,
+    immobilizer), nawet gdy inne pola formularza przypadkiem koresponduje jakimś
+    słowem z ich tagami (patrz search_kompendium_articles - samo dopasowanie słów
+    nie ma żadnego sposobu, by wiedzieć, że dany sprzęt w ogóle nie występuje)."""
+    absent = set()
+    if not tab._rfid_cb.isChecked():
+        absent.add("rfid")
+    if not tab._immo_cb.isChecked():
+        absent.add("immobilizer")
+    return absent
+
+
+def _kompendium_context_fields(tab) -> dict:
+    """Zbiera pola formularza przydatne do ważonego dopasowania artykułu w Kompendium
+    (patrz DatabaseManager.search_kompendium_articles) - Firmę, oba komentarze, model
+    i markę urządzenia, typ pojazdu, D8/markę tachografu, typ montażu, zaznaczenia CAN
+    Kierowca/Statusy i opisy funkcji DIN. Pomijamy pola-identyfikatory (SIM, nr
+    rejestracyjny, ID, nr boczny, monter, lokalizacja) - te nie mają wartości
+    kategoryzującej. Każde pole osobno podbija artykuły trafiające tagiem/tytułem -
+    działa TYLKO gdy pole szukania w Kompendium jest puste (patrz search_kompendium_
+    articles - ręcznie wpisane zapytanie w całości porzuca tę sugestię)."""
+    model_text = tab._device_model_combo.text().strip()
+    return {
+        "firma": tab._company_edit.text().strip(),
+        "komentarz_prywatny": tab._private_comment_edit.toPlainText().strip(),
+        "komentarz_protokolu": tab._comment_edit.toPlainText().strip(),
+        "model_urzadzenia": model_text,
+        # Surowy tekst modelu ("FMC650") rzadko dosłownie pasuje do tagów artykułu -
+        # ta sama heurystyka co przy filtrowaniu Komend (_detect_brand_from_model)
+        # daje realną markę ("Teltonika"), która już trafia w tagi.
+        "wykryta_marka_rejestratora": _detect_brand_from_model(model_text),
+        "marka_model": tab._brand_edit.text().strip(),
+        "typ_pojazdu": tab._vehicle_type_combo.text().strip(),
+        "typ_montazu": _checked_typ_montazu(tab),
+        "d8": tab._d8_combo.currentText().strip(),
+        "marka_tachografu": _tacho_brand_context(tab),
+        "can_kierowca_statusy": _can_driver_status_hint(tab),
+        "din_funkcje": _din_functions_text(tab),
+    }
 
 
 def _clear_din_sns(cfg: dict) -> None:
@@ -172,6 +274,31 @@ class ServiceForm(QDialog):
         self._btn_panel.setToolTip("Otwórz panel GPS i skopiuj ID urządzenia do schowka")
         f_lay.addWidget(self._btn_panel)
 
+        # Moduł w budowie - patrz KOMPENDIUM_ENABLED w config.py. Kontekstowe wejście do
+        # Bazy wiedzy: "Baza wiedzy" bierze zapytanie z komentarza prywatnego (notatki typu
+        # "dołożenie tacho"), "Komendy" bierze markę z pola "Model urządzenia".
+        # "kompendium_buttons_enabled" (domyślnie WYŁĄCZONE) - patrz main_window.py,
+        # _setup_hidden_kompendium_shortcut - włącza się WYŁĄCZNIE ukrytym skrótem
+        # klawiszowym, celowo bez żadnej widocznej kontrolki w Ustawieniach.
+        if KOMPENDIUM_ENABLED and self._db.get_setting("kompendium_buttons_enabled", "0") == "1":
+            self._btn_kompendium = QPushButton("📚  Baza wiedzy")
+            self._btn_kompendium.setFixedHeight(_BTN_H)
+            self._btn_kompendium.setMinimumWidth(110)
+            self._btn_kompendium.setStyleSheet(_BTN_STYLE_NEUTRAL)
+            self._btn_kompendium.setToolTip(
+                "Szuka w Bazie wiedzy na podstawie komentarza prywatnego"
+            )
+            f_lay.addWidget(self._btn_kompendium)
+
+            self._btn_komendy = QPushButton("⌨️  Komendy")
+            self._btn_komendy.setFixedHeight(_BTN_H)
+            self._btn_komendy.setMinimumWidth(110)
+            self._btn_komendy.setStyleSheet(_BTN_STYLE_NEUTRAL)
+            self._btn_komendy.setToolTip(
+                "Pokazuje komendy dla marki rejestratora wykrytej z pola 'Model urządzenia'"
+            )
+            f_lay.addWidget(self._btn_komendy)
+
         f_lay.addStretch()
 
         if not self._edit_mode:
@@ -211,6 +338,9 @@ class ServiceForm(QDialog):
         self._btn_json.clicked.connect(self._on_copy_json)
         self._btn_fleet.clicked.connect(self._on_open_fleet)
         self._btn_panel.clicked.connect(self._on_open_panel)
+        if hasattr(self, "_btn_kompendium"):
+            self._btn_kompendium.clicked.connect(self._on_open_kompendium_articles)
+            self._btn_komendy.clicked.connect(self._on_open_kompendium_commands)
         self._tab_montaz._fleet_name_edit.textChanged.connect(self._on_fleet_changed)
         if self._edit_mode:
             self._btn_duplicate.clicked.connect(self._on_duplicate)
@@ -300,6 +430,40 @@ class ServiceForm(QDialog):
             self._status_message(f"ID urządzenia ({device_id}) skopiowane do schowka.")
 
         QDesktopServices.openUrl(QUrl(url))
+
+    def _open_kompendium_window(self, **kwargs):
+        # Ten sam wzorzec co okna Dallas/Kompendium z toolbara głównego okna -
+        # niezależne okno bez parenta, Python-referencja w liście przeciwko GC.
+        from ui.kompendium_dialog import KompendiumDialog
+        if not hasattr(self, "_kompendium_windows"):
+            self._kompendium_windows = []
+        dlg = KompendiumDialog(**kwargs)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg.destroyed.connect(
+            lambda: self._kompendium_windows.remove(dlg) if dlg in self._kompendium_windows else None
+        )
+        self._kompendium_windows.append(dlg)
+        dlg.show()
+
+    def _on_open_kompendium_articles(self):
+        # Pole szukania w Kompendium startuje puste (celowo - komentarz prywatny NIE
+        # jest już do niego wklejany). Zamiast tego całe zestawienie pól formularza
+        # (oba komentarze, Firma, model/marka urządzenia, typ pojazdu, D8/marka
+        # tachografu, typ montażu, CAN Kierowca/Statusy, funkcje DIN) idzie jako
+        # kontekst - ważona sugestia widoczna na górze listy, dopóki użytkownik sam
+        # czegoś nie wpisze w wyszukiwarkę (wtedy sugestia jest w całości porzucana,
+        # patrz search_kompendium_articles).
+        context_fields = _kompendium_context_fields(self._tab_montaz)
+        absent_hardware = _absent_hardware_tags(self._tab_montaz)
+        self._open_kompendium_window(
+            initial_tab="articles", initial_context_fields=context_fields,
+            initial_absent_hardware=absent_hardware,
+        )
+
+    def _on_open_kompendium_commands(self):
+        model_text = self._tab_montaz._device_model_combo.text().strip()
+        brand = _detect_brand_from_model(model_text)
+        self._open_kompendium_window(initial_tab="commands", initial_brand=brand)
 
     def _status_message(self, text: str) -> None:
         try:

@@ -2,6 +2,25 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.8",
+        "date": "2026-08-26",
+        "entries": [
+            ("Podgrywanie Dallas", [
+                "Poprawka rozpoznawania ID rejestratora/SIM w załącznikach (błędnie łapało kolumnę z modelem zamiast ID)",
+                "Obsługa formatu załączników spoza PGE/Tauron (np. eksport z 'Bieżące opomiarowanie')",
+                "Nowe kolumny 'Producent' i 'Model' w tabeli dopasowania",
+                "Wykrywanie rejestratorów innych niż Setivo (Albatros, Teltonika...) - osobny status, przycisk 'Ukryj nie-Setivo', wyłączone z liczenia 'podegranych'",
+                "Poprawka rozróżniania Skaut1 od Skaut10 (oba mają firmware zaczynające się od '1.')",
+                "Przycisk 'Ukryj bez ID rejestratora' rozpoznaje też wpisy 'brak' i samą kropkę '.'",
+                "Nowa ikona 'Ustawienia' - zarządzanie widocznością i kolejnością kolumn tabeli, zapamiętywane trwale",
+                "Rząd przycisków filtrów zawija się do kolejnej linii przy zwężaniu okna, zamiast się ściskać",
+                "Filtry i ustawienia tabeli zostają zachowane po ponownym wczytaniu eksportu z serwera",
+                "Wysyłka listy 'po jednym urządzeniu' (obejście na Tauronie) rozszerzona też na zwykły panel GPS",
+                "Drobne poprawki wizualne (odznaka liczby rekordów, kolory aktywnych przycisków)",
+            ]),
+        ],
+    },
+    {
         "version": "1.2.7",
         "date": "2026-08-10",
         "entries": [

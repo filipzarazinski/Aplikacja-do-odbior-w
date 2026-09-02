@@ -31,8 +31,19 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Metadane aplikacji ---
 APP_NAME = "Odbiory - System Zarządzania Montażami"
-APP_VERSION = "1.2.7"
+APP_VERSION = "1.2.8"
 APP_AUTHOR = "filipzarazinski"
+
+# --- Funkcje w budowie (feature flags) ---
+# Moduł "Kompendium wiedzy" (artykuły + komendy rejestratorów) jest budowany etapami,
+# ale kod jest już wydawany razem z innymi aktualizacjami - ta flaga chowa go przed
+# użytkownikami, dopóki nie będzie gotowy. Przełączyć na True, żeby ujawnić moduł.
+KOMPENDIUM_ENABLED = True
+# Edycja (dodawanie/zapisywanie/usuwanie artykułów i komend, eksport) jest osobną flagą
+# od samej widoczności modułu - Kompendium ma być redagowane tylko z jednego, kontrolo-
+# wanego miejsca (tu, programowo), a reszta użytkowników ma tylko przeglądać/wyszukiwać
+# i wczytywać gotowe pliki. Przełączyć na False, żeby ukryć wszystkie kontrolki edycji.
+KOMPENDIUM_EDIT_ENABLED = True
 
 # --- GitHub / Aktualizacje ---
 GITHUB_OWNER   = "filipzarazinski"

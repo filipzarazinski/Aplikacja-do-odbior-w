@@ -166,12 +166,14 @@ def parse_attachment(path: str) -> list[dict]:
 # Nazwy kolumn w eksporcie CSV z serwera (identyczne dla różnych firm - różni się
 # tylko kolejność/liczba pozostałych kolumn, więc szukamy po nazwie, nie po indeksie).
 _SERVER_COLUMNS = {
+    "model": "Model",
     "firmware": "Firmware urządzenia",
     "ccrc": "Crcc",
     "firmware_status": "Firmware status",
     "last_gps": "Ostatnia data GPS",
     "dallas": "DALLAS",
     "dallas_error_date": "Data zarejestrowania błędu wysyłania listy dallas",
+    "manufacturer": "Producent",
 }
 _SERVER_ID_COLUMN = "Imei"
 _SERVER_FLEET_COLUMN = "Flota"
@@ -208,15 +210,25 @@ def parse_server_export(path: str) -> tuple[dict[str, dict], str]:
             device_id = _norm(row.get(_SERVER_ID_COLUMN))
             if not device_id:
                 continue
-            result[device_id] = {key: _norm(row.get(col)) for key, col in _SERVER_COLUMNS.items()}
             fleet_val = _norm(row.get(_SERVER_FLEET_COLUMN))
+            result[device_id] = {key: _norm(row.get(col)) for key, col in _SERVER_COLUMNS.items()}
+            result[device_id]["flota"] = fleet_val
             if fleet_val:
                 fleet_counts[fleet_val] = fleet_counts.get(fleet_val, 0) + 1
 
+    # Eksporty jednej floty (PGE/Tauron) mają w kolumnie "Flota" praktycznie tylko jedną
+    # wartość - tam nawet zwykłe "najczęstsza wartość" jest wiarygodne. Ale zwykły panel
+    # GPS potrafi zwrócić eksport obejmujący WSZYSTKIE konta na serwerze naraz (dziesiątki
+    # różnych firm w jednym pliku) - tam "najczęstsza wartość" to tylko kilkanaście-dwadzieścia
+    # procent i nie oznacza niczego sensownego, więc lepiej pokazać "nierozpoznana" niż
+    # zmyślić nazwę floty. Próg: uznajemy detekcję za wiarygodną dopiero od zdecydowanej
+    # większości (>50%) niepustych wierszy.
     detected_fleet = ""
     if fleet_counts:
-        most_common = max(fleet_counts, key=fleet_counts.get)
-        detected_fleet = _normalize_fleet_label(most_common)
+        most_common, most_common_count = max(fleet_counts.items(), key=lambda kv: kv[1])
+        total_non_empty = sum(fleet_counts.values())
+        if most_common_count / total_non_empty > 0.5:
+            detected_fleet = _normalize_fleet_label(most_common)
 
     return result, detected_fleet
 
@@ -231,11 +243,13 @@ def build_matched_rows(attachment_rows: list[dict], server_map: dict[str, dict])
             "device_id": a["device_id"],
             "sim": a["sim"],
             "found": srv is not None,
+            "model": srv.get("model", "") if srv else "",
             "firmware": srv.get("firmware", "") if srv else "",
             "ccrc": srv.get("ccrc", "") if srv else "",
             "firmware_status": srv.get("firmware_status", "") if srv else "",
             "last_gps": srv.get("last_gps", "") if srv else "",
             "dallas": srv.get("dallas", "") if srv else "",
             "dallas_error_date": srv.get("dallas_error_date", "") if srv else "",
+            "manufacturer": srv.get("manufacturer", "") if srv else "",
         })
     return rows

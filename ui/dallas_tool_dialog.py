@@ -21,8 +21,12 @@ class DallasToolDialog(QDialog):
         self._is_light = DatabaseManager.instance().get_setting("theme_mode", "dark") == "light"
         self.setWindowTitle("Podgrywanie Dallas")
         self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
-        self.resize(900, 620)
-        self.setMinimumSize(500, 380)
+        self.resize(1200, 620)
+        # Rząd przycisków filtrów w zakładce "Podgrywka kart" używa FlowLayout - przy
+        # zwężaniu okna przyciski przechodzą do kolejnej linii zamiast się ściskać, więc
+        # minimum może zostać rozsądnie małe (Qt samo pilnuje, żeby nie zejść poniżej
+        # naturalnego minimum pozostałych, nie-zawijanych elementów).
+        self.setMinimumSize(640, 460)
         self._apply_dwm_titlebar()
         self._setup_ui()
 

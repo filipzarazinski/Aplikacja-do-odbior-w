@@ -17,9 +17,11 @@ from PySide6.QtWidgets import (
     QDialog, QListWidget, QListWidgetItem, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QSize, QDate, Slot, QSettings, QTimer, QPoint, QUrl, QRect, Signal
-from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QDesktopServices, QPen, QPainter, QFont
+from PySide6.QtGui import (
+    QAction, QKeySequence, QColor, QBrush, QDesktopServices, QPen, QPainter, QFont, QShortcut,
+)
 
-from config import APP_NAME, APP_VERSION, MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT
+from config import APP_NAME, APP_VERSION, MAIN_WINDOW_MIN_WIDTH, MAIN_WINDOW_MIN_HEIGHT, KOMPENDIUM_ENABLED
 from database.db_manager import DatabaseManager
 from database.models import ServiceRecord
 
@@ -680,6 +682,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._restore_settings()
         self._on_filter()
+        self._setup_hidden_kompendium_shortcut()
 
     # ------------------------------------------------------------------ UI
 
@@ -786,6 +789,18 @@ class MainWindow(QMainWindow):
         self._act_card_converter = QAction("🔢  Podgrywanie Dallas", self)
         self._act_card_converter.setToolTip("Przelicznik kart Dallas (01 <-> AD) i dopasowanie z eksportem serwera")
         tb.addAction(self._act_card_converter)
+
+        # Moduł w budowie - patrz KOMPENDIUM_ENABLED w config.py. Kod jest wydawany razem
+        # z resztą aplikacji, ale przycisk (i cały moduł) pozostaje ukryty przed
+        # użytkownikami, dopóki flaga nie zostanie ręcznie przełączona na True. Druga
+        # warstwa ukrycia - "kompendium_buttons_enabled" (domyślnie WYŁĄCZONE) - włącza
+        # się WYŁĄCZNIE ukrytym skrótem klawiszowym (patrz _setup_hidden_kompendium_
+        # shortcut), celowo BEZ żadnej widocznej kontrolki w Ustawieniach, żeby moduł
+        # pozostał niewidoczny dla reszty użytkowników do czasu pełnego udostępnienia.
+        if KOMPENDIUM_ENABLED and self._db.get_setting("kompendium_buttons_enabled", "0") == "1":
+            self._act_kompendium = QAction("📚  Baza wiedzy", self)
+            self._act_kompendium.setToolTip("Baza wiedzy i komendy do rejestratorów")
+            tb.addAction(self._act_kompendium)
 
     def _build_filter_bar(self) -> QWidget:
         bar = QWidget(self)
@@ -1187,6 +1202,8 @@ class MainWindow(QMainWindow):
         self._act_refresh.triggered.connect(self._on_filter)
         self._act_settings.triggered.connect(self._on_open_settings)
         self._act_card_converter.triggered.connect(self._on_open_card_converter)
+        if hasattr(self, "_act_kompendium"):
+            self._act_kompendium.triggered.connect(self._on_open_kompendium)
 
         self._btn_duplicate_row.clicked.connect(self._on_duplicate_row)
         self._btn_filter.clicked.connect(self._on_filter)
@@ -1853,6 +1870,77 @@ class MainWindow(QMainWindow):
         dlg.setAttribute(Qt.WA_DeleteOnClose)
         dlg.destroyed.connect(lambda: self._dallas_windows.remove(dlg) if dlg in self._dallas_windows else None)
         self._dallas_windows.append(dlg)
+        dlg.show()
+
+    # SHA-256 hasła odblokowującego prawo edycji artykułów/komend Bazy wiedzy (patrz
+    # _on_toggle_kompendium_edit) - samo hasło nigdzie nie jest zapisane w postaci
+    # jawnej, tylko ten hash porównawczy.
+    _KOMPENDIUM_ADMIN_HASH = "b7d449202df5dbd3f163197a838ae55a8a316acb2c5f55e6270d3c0b6fdbd5b2"
+
+    def _setup_hidden_kompendium_shortcut(self):
+        """Ukryte skróty do Bazy wiedzy - CELOWO bez żadnej widocznej kontrolki w
+        Ustawieniach, żeby moduł pozostał niewidoczny dla reszty użytkowników (mają ten
+        sam build co Ty) do czasu, aż będzie gotowy do pełnego udostępnienia.
+        Ctrl+Alt+Shift+K przełącza samą widoczność przycisków, bez hasła. Ctrl+Alt+Shift+E
+        przełącza prawo edycji, wymaga hasła (patrz _on_toggle_kompendium_edit) - samo
+        poznanie skrótu klawiszowego nie wystarcza do odblokowania edycji. Zmiana wymaga
+        restartu aplikacji, tak jak zmiana motywu - przyciski są budowane raz, przy
+        starcie."""
+        if not KOMPENDIUM_ENABLED:
+            return
+        sc_visibility = QShortcut(QKeySequence("Ctrl+Alt+Shift+K"), self)
+        sc_visibility.activated.connect(self._on_toggle_kompendium_visibility)
+        sc_edit = QShortcut(QKeySequence("Ctrl+Alt+Shift+E"), self)
+        sc_edit.activated.connect(self._on_toggle_kompendium_edit)
+
+    def _on_toggle_kompendium_visibility(self):
+        enabled = self._db.get_setting("kompendium_buttons_enabled", "0") == "1"
+        new_state = "0" if enabled else "1"
+        self._db.set_setting("kompendium_buttons_enabled", new_state)
+        stan = "wyłączone" if enabled else "włączone"
+        QMessageBox.information(
+            self, "Baza wiedzy",
+            f"Przyciski 'Baza wiedzy' / 'Komendy': {stan}.\n"
+            "Uruchom aplikację ponownie, żeby zobaczyć zmianę.",
+        )
+
+    def _on_toggle_kompendium_edit(self):
+        # Hasło jest potrzebne TYLKO do odblokowania (0 -> 1) - z powrotem zablokować
+        # (1 -> 0) może każdy, kto zna sam skrót, bez podawania hasła. To świadomy
+        # wybór: skoro na tej instalacji edycja już jest odblokowana, ponowne wpisywanie
+        # hasła tylko po to, żeby ją znowu zablokować, to zbędne tarcie bez realnej
+        # korzyści bezpieczeństwa - a odblokowanie z powrotem i tak znowu wymaga hasła.
+        enabled = self._db.get_setting("kompendium_edit_unlocked", "0") == "1"
+        if not enabled:
+            import hashlib
+            from PySide6.QtWidgets import QInputDialog, QLineEdit
+            pwd, ok = QInputDialog.getText(self, "Baza wiedzy", "Hasło:", QLineEdit.Password)
+            if not ok:
+                return
+            if hashlib.sha256(pwd.encode("utf-8")).hexdigest() != self._KOMPENDIUM_ADMIN_HASH:
+                QMessageBox.warning(self, "Baza wiedzy", "Nieprawidłowe hasło.")
+                return
+        new_state = "0" if enabled else "1"
+        self._db.set_setting("kompendium_edit_unlocked", new_state)
+        stan = "wyłączony" if enabled else "włączony"
+        QMessageBox.information(
+            self, "Baza wiedzy",
+            f"Tryb edycji: {stan}.\n"
+            "Uruchom aplikację ponownie, żeby zobaczyć zmianę.",
+        )
+
+    def _on_open_kompendium(self):
+        # Ten sam wzorzec co _on_open_card_converter - niezależne okno bez parenta,
+        # Python-referencja w liście, żeby GC go nie zwolniło.
+        from ui.kompendium_dialog import KompendiumDialog
+        if not hasattr(self, "_kompendium_windows"):
+            self._kompendium_windows = []
+        dlg = KompendiumDialog()
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg.destroyed.connect(
+            lambda: self._kompendium_windows.remove(dlg) if dlg in self._kompendium_windows else None
+        )
+        self._kompendium_windows.append(dlg)
         dlg.show()
 
     @Slot(set, list)

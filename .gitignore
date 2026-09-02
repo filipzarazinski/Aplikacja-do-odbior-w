@@ -2,6 +2,10 @@
 data/
 data_path.txt
 
+# Notatka zawiera realny (choć krótkotrwały) podpisany link S3 z przechwyconego
+# ruchu sieciowego - nie powinna trafić do publicznego repo
+NOTATKA_auto_eksport_gps_framelogic.txt
+
 # Logi aplikacji
 *.log
 
@@ -33,6 +37,12 @@ OBD.csv
 pge.csv
 tauron.csv
 test.csv
+import_sim.csv
+odczytpanelgps.csv
 *.xlsx
 *.xls
 *.xlsm
+
+# Skrypt Tampermonkey do ponownej wysyłki listy Dallas - roboczy plik trzymany lokalnie
+# do wglądu/edycji, nie część kodu aplikacji.
+Ponowne wgranie listy DALLAS*.txt
