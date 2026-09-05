@@ -31,7 +31,7 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Metadane aplikacji ---
 APP_NAME = "Odbiory - System Zarządzania Montażami"
-APP_VERSION = "1.2.8"
+APP_VERSION = "1.2.9"
 APP_AUTHOR = "filipzarazinski"
 
 # --- Funkcje w budowie (feature flags) ---

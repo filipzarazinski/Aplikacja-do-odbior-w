@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
     QGroupBox, QLabel, QLineEdit, QComboBox, QTextEdit,
     QCheckBox, QRadioButton, QSpinBox, QDateEdit, QTimeEdit,
     QFrame, QButtonGroup, QTabWidget,
-    QSizePolicy, QApplication, QAbstractSpinBox, QCompleter, QToolTip
+    QSizePolicy, QApplication, QAbstractSpinBox, QCompleter, QToolTip,
+    QPushButton, QDialog, QMenu, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QDate, QTime, Slot, QTimer, QEvent, QStringListModel
 from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon, QAction
@@ -198,6 +199,35 @@ def _combo(items=None, editable=False, w=0) -> QComboBox:
 
 def _rb(t: str) -> QRadioButton:
     r = QRadioButton(t); r.setStyleSheet(_RB_STYLE); return r
+
+_QUICK_BTN_H = 20
+_QUICK_BTN_STYLE = f"""
+QPushButton {{
+    background: {_BG_INPUT}; color: {_TEXT_DIM}; border: 1px solid {_BORDER};
+    border-radius: 3px; font-size: 7.5pt; font-weight: 600; padding: 2px 4px;
+    min-height: {_QUICK_BTN_H}px; max-height: {_QUICK_BTN_H}px;
+}}
+QPushButton:hover {{ border-color: #3b82f6; color: #3b82f6; }}
+"""
+_QUICK_BTN_EMPTY_STYLE = f"""
+QPushButton {{
+    background: transparent; color: {_TEXT_MUTE}; border: 1px dashed {_BORDER};
+    border-radius: 3px; font-size: 7.5pt; font-weight: 600; padding: 2px 4px;
+    min-height: {_QUICK_BTN_H}px; max-height: {_QUICK_BTN_H}px;
+}}
+QPushButton:hover {{ border-color: #3b82f6; color: #3b82f6; }}
+"""
+
+# Skróty D8/marka/wersja tachografu - 4 przyciski, konfigurowalne przez PPM
+# ("Edytuj..."), stan trzymany trwale w app_settings (współdzielony dla
+# wszystkich rekordów, nie per-rekord).
+_TACHO_PRESETS_SETTING_KEY = "tacho_quick_presets"
+_TACHO_PRESETS_SLOTS = 4
+
+def _default_tacho_presets() -> list[dict]:
+    empty = {"label": "", "d8": "", "brand": "", "version": ""}
+    first = {"label": "VDO 041", "d8": "Tachoreader", "brand": "Siemens", "version": "041"}
+    return [first] + [dict(empty) for _ in range(_TACHO_PRESETS_SLOTS - 1)]
 
 def _cb(t: str) -> QCheckBox:
     c = QCheckBox(t); c.setStyleSheet(_CB_STYLE); return c
@@ -511,9 +541,26 @@ class MontazTab(QWidget):
         fg.addLayout(fg_ver_lay)
         self._fmb_grp.setVisible(False)
         d8_l.addWidget(self._fmb_grp)
-        
+
         d8_l.addStretch()
-        lay.addWidget(d8_w, stretch=2) 
+
+        presets_lay = QHBoxLayout()
+        presets_lay.setSpacing(4)
+        self._tacho_preset_btns: list[QPushButton] = []
+        for i in range(_TACHO_PRESETS_SLOTS):
+            btn = QPushButton("")
+            btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            btn.clicked.connect(lambda checked=False, idx=i: self._on_tacho_preset_clicked(idx))
+            btn.customContextMenuRequested.connect(
+                lambda pos, idx=i, b=btn: self._on_tacho_preset_context_menu(idx, b.mapToGlobal(pos))
+            )
+            self._tacho_preset_btns.append(btn)
+            presets_lay.addWidget(btn)
+        d8_l.addLayout(presets_lay)
+        self._load_tacho_presets()
+        self._refresh_tacho_preset_buttons()
+
+        lay.addWidget(d8_w, stretch=2)
 
         tabs = QTabWidget(w)
         tabs.setFixedWidth(380)
@@ -1303,6 +1350,94 @@ class MontazTab(QWidget):
         self._tacho_grp.setVisible(v == "Tachoreader")
         self._fmb_grp.setVisible(v == "FMB640/FMC650")
 
+    # ── Przyciski-skróty D8/marka/wersja tachografu ──────────────────────────
+
+    def _load_tacho_presets(self):
+        raw = self._db.get_setting(_TACHO_PRESETS_SETTING_KEY, "")
+        presets = None
+        if raw:
+            try:
+                loaded = json.loads(raw)
+                if isinstance(loaded, list):
+                    presets = loaded
+            except (json.JSONDecodeError, TypeError):
+                presets = None
+        if not presets:
+            presets = _default_tacho_presets()
+        # Zawsze dokładnie _TACHO_PRESETS_SLOTS wpisów, nawet gdyby stara/ręcznie
+        # edytowana wartość w bazie miała inną długość.
+        while len(presets) < _TACHO_PRESETS_SLOTS:
+            presets.append({"label": "", "d8": "", "brand": "", "version": ""})
+        self._tacho_presets = presets[:_TACHO_PRESETS_SLOTS]
+
+    def _save_tacho_presets(self):
+        self._db.set_setting(_TACHO_PRESETS_SETTING_KEY, json.dumps(self._tacho_presets, ensure_ascii=False))
+
+    def _refresh_tacho_preset_buttons(self):
+        for i, btn in enumerate(self._tacho_preset_btns):
+            preset = self._tacho_presets[i]
+            label = (preset.get("label") or "").strip()
+            if label:
+                btn.setText(label)
+                btn.setStyleSheet(_QUICK_BTN_STYLE)
+                d8 = preset.get("d8") or "—"
+                brand = preset.get("brand") or "—"
+                ver = preset.get("version") or "—"
+                btn.setToolTip(
+                    f"{d8} · {brand} · wer. {ver}\n"
+                    "Klik: zastosuj  •  PPM: edytuj/wyczyść"
+                )
+            else:
+                btn.setText("+")
+                btn.setStyleSheet(_QUICK_BTN_EMPTY_STYLE)
+                btn.setToolTip("Skonfiguruj skrót (klik lub PPM)")
+
+    def _apply_tacho_preset(self, preset: dict):
+        d8 = preset.get("d8") or ""
+        if not d8:
+            return
+        self._d8_combo.setCurrentText(d8)
+        self._on_d8_changed(d8)  # setCurrentText nie emituje, gdy wartość się nie zmienia
+        brand = preset.get("brand") or ""
+        version = preset.get("version") or ""
+        if d8 == "Tachoreader":
+            if brand == "Siemens": self._rb_siemens.setChecked(True)
+            elif brand == "Stoneridge": self._rb_stonerige.setChecked(True)
+            self._tacho_ver.setText(version)
+        elif d8 == "FMB640/FMC650":
+            if brand == "Siemens": self._rb_tel_s.setChecked(True)
+            elif brand == "Stoneridge": self._rb_tel_sr.setChecked(True)
+            elif brand == "Inne": self._rb_tel_i.setChecked(True)
+            self._tacho_fmb_ver.setText(version)
+
+    def _on_tacho_preset_clicked(self, idx: int):
+        preset = self._tacho_presets[idx]
+        if (preset.get("label") or "").strip():
+            self._apply_tacho_preset(preset)
+        else:
+            self._edit_tacho_preset(idx)
+
+    def _on_tacho_preset_context_menu(self, idx: int, global_pos):
+        preset = self._tacho_presets[idx]
+        configured = bool((preset.get("label") or "").strip())
+        menu = QMenu(self)
+        menu.addAction("Edytuj...", lambda: self._edit_tacho_preset(idx))
+        clear_action = menu.addAction("Wyczyść", lambda: self._clear_tacho_preset(idx))
+        clear_action.setEnabled(configured)
+        menu.exec(global_pos)
+
+    def _clear_tacho_preset(self, idx: int):
+        self._tacho_presets[idx] = {"label": "", "d8": "", "brand": "", "version": ""}
+        self._save_tacho_presets()
+        self._refresh_tacho_preset_buttons()
+
+    def _edit_tacho_preset(self, idx: int):
+        dlg = _TachoPresetEditDialog(self._tacho_presets[idx], self)
+        if dlg.exec() == QDialog.Accepted:
+            self._tacho_presets[idx] = dlg.result_preset()
+            self._save_tacho_presets()
+            self._refresh_tacho_preset_buttons()
+
     @Slot(bool)
     def _on_webasto_changed(self, checked: bool):
         self._webasto_din_combo.setEnabled(checked)
@@ -1689,5 +1824,69 @@ class MontazTab(QWidget):
             "an1Pojemnosc": self._probe2_cap.text().strip(),
             "an1Skalowanie": self._probe2_len.text().strip(),
         }
-        
+
         return True, ""
+
+
+class _TachoPresetEditDialog(QDialog):
+    """Edycja jednego przycisku-skrótu D8/marka/wersja tachografu, patrz
+    MontazTab._edit_tacho_preset - te przyciski są niezależne od konkretnego
+    rekordu, tylko przyśpieszają wypełnianie sekcji TACHO/TELTONIKA."""
+
+    def __init__(self, preset: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Skrót tachografu")
+        self.setStyleSheet(f"background:{_BG_MAIN};")
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+
+        lay.addWidget(_lbl("Nazwa przycisku"))
+        self._label_edit = _inp("")
+        self._label_edit.setText(preset.get("label", ""))
+        lay.addWidget(self._label_edit)
+
+        lay.addWidget(_lbl("D8"))
+        self._d8_combo = _combo([""] + D8_OPTIONS)
+        lay.addWidget(self._d8_combo)
+
+        lay.addWidget(_lbl("Marka"))
+        self._brand_combo = _combo([])
+        lay.addWidget(self._brand_combo)
+
+        lay.addWidget(_lbl("Wersja"))
+        self._ver_edit = _inp("")
+        self._ver_edit.setText(preset.get("version", ""))
+        lay.addWidget(self._ver_edit)
+
+        self._d8_combo.currentTextChanged.connect(self._refresh_brand_options)
+        self._d8_combo.setCurrentText(preset.get("d8", ""))
+        self._refresh_brand_options(self._d8_combo.currentText())
+        saved_brand = preset.get("brand", "")
+        if saved_brand:
+            self._brand_combo.setCurrentText(saved_brand)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def _refresh_brand_options(self, d8: str):
+        current = self._brand_combo.currentText()
+        self._brand_combo.clear()
+        if d8 == "Tachoreader":
+            options = [""] + TACHO_BRANDS_TACHOREADER
+        elif d8 == "FMB640/FMC650":
+            options = [""] + TACHO_BRANDS_FMB640
+        else:
+            options = [""]
+        self._brand_combo.addItems(options)
+        if current in options:
+            self._brand_combo.setCurrentText(current)
+
+    def result_preset(self) -> dict:
+        return {
+            "label": self._label_edit.text().strip(),
+            "d8": self._d8_combo.currentText(),
+            "brand": self._brand_combo.currentText(),
+            "version": self._ver_edit.text().strip(),
+        }

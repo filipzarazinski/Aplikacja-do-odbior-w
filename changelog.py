@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.2.9",
+        "date": "2026-09-05",
+        "entries": [
+            ("Formularz", [
+                "Nowe przyciski-skróty D8/marka/wersja tachografu (sekcja TACHO/TELTONIKA) - jeden klik ustawia D8, markę i wersję naraz",
+            ]),
+        ],
+    },
+    {
         "version": "1.2.8",
         "date": "2026-08-26",
         "entries": [
